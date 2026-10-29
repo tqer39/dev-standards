@@ -100,6 +100,19 @@ run = "./.standards/cache/dev-standards finish"
 `
 }
 
+func automatedTasks() string {
+	raw := strings.ReplaceAll(tasks()+automationTasks(), "run = \"dev-standards ", "run = \"./.standards/cache/dev-standards ")
+	var lines []string
+	for _, line := range strings.Split(raw, "\n") {
+		lines = append(lines, line)
+		if command, ok := strings.CutPrefix(line, `run = "./.standards/cache/dev-standards `); ok {
+			command = strings.TrimSuffix(command, `"`)
+			lines = append(lines, `run_windows = '.\.standards\cache\dev-standards.exe `+command+`'`)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 const projectWorkflow = `name: Dev Standards
 on: [push, pull_request]
 permissions:

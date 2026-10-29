@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BurntSushi/toml"
 	bundle "github.com/tqer39/dev-standards"
 )
 
@@ -23,6 +24,18 @@ func TestAutomationAdoptionAndStableHooks(t *testing.T) {
 	}
 	if !strings.Contains(read(t, tree.Root, "AGENTS.md"), "既存の指示") {
 		t.Fatal("lost original instructions")
+	}
+	var taskConfig map[string]struct {
+		Run        string
+		RunWindows string `toml:"run_windows"`
+	}
+	if _, err := toml.Decode(read(t, tree.Root, ".standards/tasks.standards.toml"), &taskConfig); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"format:check", "standards:check", "standards:plan", "standards:verify", "standards:prepare", "standards:finish"} {
+		if !strings.HasPrefix(taskConfig[name].RunWindows, `.\.standards\cache\dev-standards.exe `) {
+			t.Fatalf("Windows launcher missing for %s: %+v", name, taskConfig[name])
+		}
 	}
 	original := read(t, tree.Root, ".codex/hooks.json")
 	if !strings.Contains(original, "echo original") {

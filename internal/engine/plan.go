@@ -229,7 +229,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		if err := t.automationFiles(p, desired); err != nil {
 			return nil, err
 		}
-		desired[".standards/tasks.standards.toml"] = file(strings.ReplaceAll(tasks()+automationTasks(), "run = \"dev-standards ", "run = \"./.standards/cache/dev-standards "))
+		desired[".standards/tasks.standards.toml"] = file(automatedTasks())
 	}
 	if err := validateIgnore(desired[".gitignore"].Content); err != nil {
 		return nil, err

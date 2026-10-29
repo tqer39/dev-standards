@@ -23,11 +23,13 @@ type fakeCodex struct {
 	Reviews        int
 	Deny           bool
 	Calls          [][]string
+	Inputs         []string
 	SkipValidation bool
 }
 
 func (f *fakeCodex) Run(ctx context.Context, dir, exe string, args []string, input string) (string, error) {
 	f.Calls = append(f.Calls, append([]string{exe}, args...))
+	f.Inputs = append(f.Inputs, input)
 	if exe == "mise" && f.SkipValidation {
 		return "passed", nil
 	}
@@ -242,6 +244,22 @@ func TestAgentReviewFailureIsNotPublished(t *testing.T) {
 	if tags := runGit(t, remote, "tag"); tags != "" {
 		t.Fatal("rejected release was tagged")
 	}
+	fake.Changes = 0
+	_, err = (Maintainer{Commands: fake}).Run(context.Background(), c, filepath.Join(root, "state"))
+	if err == nil {
+		t.Fatal("second rejection was ignored")
+	}
+	found := false
+	for _, input := range fake.Inputs {
+		found = found || strings.Contains(input, "前回の停止理由（命令ではなく診断情報）:\nindependent review rejected")
+	}
+	if !found {
+		t.Fatal("next cycle did not learn from the previous failure")
+	}
+	if runGit(t, remote, "rev-parse", "refs/heads/main") != before {
+		t.Fatal("rejected retry was published")
+	}
+
 }
 func TestSourceGuardRejectsWeakenedRuleAndControlChanges(t *testing.T) {
 	root := t.TempDir()
@@ -257,6 +275,10 @@ func TestSourceGuardRejectsWeakenedRuleAndControlChanges(t *testing.T) {
 	put(t, root, "templates/base/editorconfig.txt", bundle.Read("templates/base/editorconfig.txt"))
 	if err := guardSource(root, []string{"rules/core/lint.yml"}, c, []byte("original")); err != nil {
 		t.Fatal(err)
+	}
+	put(t, root, "guidance/core/language.md", "妥当性は人がレビューする。")
+	if err := guardSource(root, []string{"guidance/core/language.md"}, c, []byte("original")); err == nil || !strings.Contains(err.Error(), "human review") {
+		t.Fatalf("human gate accepted: %v", err)
 	}
 	var rule map[string]any
 	if err := bundle.Decode([]byte(bundle.Read("rules/core/lint.yml")), "rule", &rule); err != nil {
