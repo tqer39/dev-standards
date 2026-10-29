@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "status": {
+      "enum": [
+        "active",
+        "deprecated",
+        "retired"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    },
+    "appliesTo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profiles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "profiles"
+      ]
+    },
+    "phases": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "adopt",
+          "pr",
+          "scheduled",
+          "release"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "enforcement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "enum": [
+            "error",
+            "warning",
+            "advisory"
+          ]
+        },
+        "waivable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "level",
+        "waivable"
+      ]
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "type": {
+            "enum": [
+              "builtin",
+              "mise",
+              "github",
+              "review"
+            ]
+          },
+          "handler": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "parameters": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "handler",
+          "parameters"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "remediation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "automatic",
+            "assisted",
+            "manual"
+          ]
+        },
+        "handler": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "instructions": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "mode",
+        "handler",
+        "instructions"
+      ]
+    },
+    "guidance": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/\\\\:][^\\\\:]*$",
+      "not": {
+        "pattern": "(^|/)\\.\\.(/|$)"
+      }
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uri"
+      },
+      "minItems": 0,
+      "uniqueItems": true
+    },
+    "supersededBy": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+$"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "id",
+    "revision",
+    "status",
+    "title",
+    "rationale",
+    "appliesTo",
+    "phases",
+    "enforcement",
+    "checks",
+    "remediation",
+    "guidance",
+    "references"
+  ]
+}

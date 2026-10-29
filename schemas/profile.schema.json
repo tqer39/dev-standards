@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "rules",
+    "platforms",
+    "tools"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "enum": [
+        "base",
+        "go"
+      ]
+    },
+    "rules": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+$"
+      }
+    },
+    "platforms": {
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 1,
+      "items": {
+        "enum": [
+          "macos",
+          "linux",
+          "windows"
+        ]
+      }
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "go": {
+          "type": "string",
+          "pattern": "^[0-9]+[.][0-9]+[.][0-9]+$"
+        }
+      }
+    }
+  }
+}

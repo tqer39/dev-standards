@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "base",
+  "rules": [
+    "CORE-EDITORCONFIG",
+    "CORE-GITIGNORE",
+    "CORE-MISE",
+    "CORE-BOOTSTRAP",
+    "CORE-LINT",
+    "CORE-FORMAT",
+    "PROCESS-LANGUAGE"
+  ],
+  "platforms": [
+    "macos",
+    "linux",
+    "windows"
+  ],
+  "tools": {}
+}

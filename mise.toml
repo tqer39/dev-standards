@@ -1,0 +1,34 @@
+[tools]
+go = "1.27.3"
+node = "24.21.0"
+"npm:markdownlint-cli2" = "0.23.3"
+
+[tasks.bootstrap]
+run = "go mod download"
+
+[tasks.lint]
+run = ["go vet ./...", "markdownlint-cli2"]
+
+[tasks.format]
+run = "go fmt ./..."
+
+[tasks."format:check"]
+run = "go run ./cmd/dev-standards format-check"
+
+[tasks.test]
+run = "go test ./..."
+
+[tasks."test:race"]
+run = "go test -race ./..."
+
+[tasks.build]
+run = "go build -o bin/ ./cmd/dev-standards"
+
+[tasks.check]
+depends = ["lint", "format:check", "test", "build"]
+
+[tasks."catalog:check"]
+run = "go run ./cmd/dev-standards catalog"
+
+[tasks."security:check"]
+run = "go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./..."

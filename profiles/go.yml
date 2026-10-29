@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "go",
+  "rules": [],
+  "platforms": [
+    "macos",
+    "linux",
+    "windows"
+  ],
+  "tools": {
+    "go": "1.27.3"
+  }
+}

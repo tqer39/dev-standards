@@ -1,0 +1,8 @@
+{
+  "globs": ["**/*.md"],
+  "ignores": ["bin/**"],
+  "config": {
+    "default": true,
+    "MD013": false
+  }
+}
