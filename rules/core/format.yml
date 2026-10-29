@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "id": "CORE-FORMAT",
-  "revision": 1,
+  "revision": 2,
   "status": "active",
   "title": "整形を検証する",
-  "rationale": "共通の開発手順を成果物と検査で再現する。",
+  "rationale": "Go の標準整形との差分を検出し、レビューで書式だけの差分が混ざることを防ぐ。",
   "appliesTo": {
     "profiles": [
       "base"
@@ -29,7 +29,7 @@
   "remediation": {
     "mode": "automatic",
     "handler": "managed-file",
-    "instructions": "計画を確認して適用し、check と verify で確認する。"
+    "instructions": "mise run format で整形し、mise run format:check または verify で差分がないことを確認する。"
   },
   "guidance": "guidance/core/format.md",
   "references": []

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "id": "CORE-MISE",
-  "revision": 1,
+  "revision": 2,
   "status": "active",
   "title": "タスクの入口を mise に集約する",
-  "rationale": "共通の開発手順を成果物と検査で再現する。",
+  "rationale": "Go の版と共通タスク名を固定し、ローカルと CI が同じ入口を使用できるようにする。",
   "appliesTo": {
     "profiles": [
       "base"
@@ -29,7 +29,7 @@
   "remediation": {
     "mode": "automatic",
     "handler": "managed-file",
-    "instructions": "計画を確認して適用し、check と verify で確認する。"
+    "instructions": "固有のツール設定は .standards/mise.project.toml、固有タスクは .standards/tasks.project.toml に記録し、計画を作り直して適用する。"
   },
   "guidance": "guidance/core/mise.md",
   "references": []

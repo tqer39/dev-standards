@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "id": "PROCESS-LANGUAGE",
-  "revision": 1,
+  "revision": 2,
   "status": "active",
   "title": "要件から開発言語を選定する",
-  "rationale": "共通の開発手順を成果物と検査で再現する。",
+  "rationale": "要件、比較した候補、選定理由を残し、言語選定を後から再評価できるようにする。",
   "appliesTo": {
     "profiles": [
       "base"
@@ -29,7 +29,7 @@
   "remediation": {
     "mode": "manual",
     "handler": "decision",
-    "instructions": "計画を確認して適用し、check と verify で確認する。"
+    "instructions": "言語選定記録の要件、候補、選定理由を具体化し、構造検査とは別に妥当性をレビューする。"
   },
   "guidance": "guidance/core/language.md",
   "references": []

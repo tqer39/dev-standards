@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "id": "CORE-BOOTSTRAP",
-  "revision": 1,
+  "revision": 2,
   "status": "active",
   "title": "繰り返し実行できるセットアップ",
-  "rationale": "共通の開発手順を成果物と検査で再現する。",
+  "rationale": "依存取得の入口を固定し、新しい環境でも同じ手順で開発を開始できるようにする。",
   "appliesTo": {
     "profiles": [
       "base"
@@ -29,7 +29,7 @@
   "remediation": {
     "mode": "automatic",
     "handler": "managed-file",
-    "instructions": "計画を確認して適用し、check と verify で確認する。"
+    "instructions": "共通の bootstrap タスクを再生成し、依存取得は新しい環境で別途実行して結果を確認する。"
   },
   "guidance": "guidance/core/bootstrap.md",
   "references": []
