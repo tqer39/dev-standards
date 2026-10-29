@@ -27,13 +27,13 @@ func (t *Tree) automationFiles(p *Plan, desired map[string]Snapshot) error {
 	}
 	local := p.Inputs[".standards/agents.local.md"]
 	if !local.Exists {
-		local = file(p.Inputs["AGENTS.md"].Content)
+		local = file(normalized(p.Inputs["AGENTS.md"].Content))
 		if _, owned := previous.Files["AGENTS.md"]; owned {
 			return fmt.Errorf("AGENTS source missing")
 		}
 		desired[".standards/agents.local.md"] = local
 	}
-	desired["AGENTS.md"] = file(strings.TrimRight(local.Content, "\n") + "\n\n# 共通開発ルール\n\n作業開始時に `.standards/rules.md` を読み、`mise run standards:prepare` を実行する。\n作業終了前に `mise run standards:finish` を実行する。\n不足する設定は整備し、共通ルールの問題は `dev-standards feedback` で記録する。\n共通ルールの保守に人間の追加指示・承認を待たず、設定済みの自律保守に引き継ぐ。\n")
+	desired["AGENTS.md"] = file(strings.TrimRight(normalized(local.Content), "\n") + "\n\n# 共通開発ルール\n\n作業開始時に `.standards/rules.md` を読み、`mise run standards:prepare` を実行する。\n作業終了前に `mise run standards:finish` を実行する。\n不足する設定は整備し、共通ルールの問題は `dev-standards feedback` で記録する。\n共通ルールの保守に人間の追加指示・承認を待たず、設定済みの自律保守に引き継ぐ。\n")
 	desired[".standards/rules.md"] = file("# 共通ルール\n\nEditorConfig、gitignore.io の採用入力、mise の作業入口を維持する。\n要件・言語選定記録を参照し、変更に対応した静的解析、整形、テストを実行する。\n生成物は直接編集せず `.standards` の正本を編集して再適用する。\n実行していない検査を成功と報告しない。\n更新は検証済みの版を採用し、作業中の入力と無関係な変更を保持する。\nルールの重複・矛盾・古い判断は根拠とともに保守へ記録する。\n")
 	hooks := map[string]any{}
 	raw := p.Inputs[".standards/hooks.local.json"]

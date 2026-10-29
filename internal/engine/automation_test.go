@@ -3,7 +3,9 @@ package engine
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -167,6 +169,56 @@ func TestUpgradeNeverDowngradesOrDropsOwnership(t *testing.T) {
 	} {
 		if nonDowngrade(tc.old, tc.current) != tc.want {
 			t.Fatalf("version ordering: %+v", tc)
+		}
+	}
+}
+
+func TestAutomationCheckoutKeepsCanonicalLineEndings(t *testing.T) {
+	tree := fixture(t)
+	write(t, tree.Root, "AGENTS.md", "# 固有ルール\r\n\r\n既存の指示。\r\n")
+	run := func(args ...string) string {
+		t.Helper()
+		b, err := exec.Command("git", append([]string{"-C", tree.Root}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s %v", args, b, err)
+		}
+		return string(b)
+	}
+	run("config", "core.autocrlf", "true")
+	p, err := tree.Plan(Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md", Automation: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = tree.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "adopt")
+	for _, name := range automationPaths {
+		if err := os.Remove(filepath.Join(tree.Root, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("checkout", "HEAD", "--", "AGENTS.md", ".codex/hooks.json", ".standards/rules.md", ".github/workflows/dev-standards.yml")
+	p, err = tree.Plan(Request{Mode: "upgrade", Automation: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Conflicts) != 0 || len(p.Changes) != 0 {
+		t.Fatalf("checkout introduced drift: conflicts=%v changes=%+v", p.Conflicts, p.Changes)
+	}
+	if err = tree.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	write(t, tree.Root, "AGENTS.md", "# changed\n")
+	write(t, tree.Root, ".editorconfig", "root = true\n")
+	for i := 0; i < 10; i++ {
+		p, err = tree.Plan(Request{Mode: "upgrade", Automation: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p.Conflicts) != 2 || !sort.StringsAreSorted(p.Conflicts) {
+			t.Fatalf("unstable conflicts: %v", p.Conflicts)
 		}
 	}
 }
