@@ -51,6 +51,7 @@ type Change struct {
 }
 type Request struct {
 	Mode         string `json:"mode"`
+	Automation   bool   `json:"automation,omitempty"`
 	Profile      string `json:"profile,omitempty"`
 	DecisionPath string `json:"decisionPath,omitempty"`
 }

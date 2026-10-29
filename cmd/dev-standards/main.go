@@ -24,7 +24,7 @@ func run(args []string, out, errOut io.Writer) int {
 }
 func execute(args []string, out, errOut io.Writer) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
-		fmt.Fprintln(out, "dev-standards inspect|adopt|plan|apply|check|verify|format-check|catalog|version\n\n対象は Git リポジトリのルート。各コマンドの --help で引数を確認できます。")
+		fmt.Fprintln(out, "dev-standards inspect|adopt|plan|apply|check|verify|audit|onboard|sync|host-init|maintain|prepare|finish|hook|feedback|session-verify|format-check|catalog|version\n\n対象は Git リポジトリのルート。各コマンドの --help で引数を確認できます。")
 		return nil
 	}
 	if args[0] == "version" || args[0] == "--version" {
@@ -32,6 +32,10 @@ func execute(args []string, out, errOut io.Writer) error {
 		return nil
 	}
 	command := args[0]
+	switch command {
+	case "audit", "onboard", "sync", "host-init", "maintain", "prepare", "finish", "hook", "feedback", "session-verify":
+		return automationCommand(command, args[1:], out, errOut)
+	}
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(errOut)
 	root := flags.String("repo", ".", "対象リポジトリのルート")
@@ -62,6 +66,11 @@ func execute(args []string, out, errOut io.Writer) error {
 		}
 		_, err = out.Write(engine.JSON(rules))
 		return err
+	}
+	if command == "check" || command == "verify" || command == "plan" {
+		if handled, err := forwardRuntime(*root, command, args[1:], out, errOut); handled || err != nil {
+			return err
+		}
 	}
 	tree, err := engine.Open(*root)
 	if err != nil {

@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 
 	bundle "github.com/tqer39/dev-standards"
@@ -35,8 +36,8 @@ func validateManifest(m Manifest) error {
 	if len(m.Components) != 1 || m.Components[0].Path != "." || m.Components[0].Profile != "go" {
 		return fmt.Errorf("initial release supports one Go component at the repository root")
 	}
-	if len(m.AI.Targets) != 0 {
-		return fmt.Errorf("AI targets require the later rulesync integration; use an empty list")
+	if len(m.AI.Targets) > 0 && (len(m.AI.Targets) != 1 || m.AI.Targets[0] != "codexcli") {
+		return fmt.Errorf("only the codexcli adapter is supported")
 	}
 	if m.Gitignore.Local != ".standards/gitignore.local" {
 		return fmt.Errorf("gitignore.local path is reserved")
@@ -119,4 +120,42 @@ func validateInputPath(p string) error {
 		return fmt.Errorf("language decision input must be a Markdown file")
 	}
 	return nil
+}
+
+func versionParts(s string) ([3]int, error) {
+	var parts [3]int
+	values := strings.Split(s, ".")
+	if len(values) != 3 {
+		return parts, fmt.Errorf("invalid version")
+	}
+	for i, v := range values {
+		if !pinnedGo(s) {
+			return parts, fmt.Errorf("invalid version")
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return parts, err
+		}
+		parts[i] = n
+	}
+	return parts, nil
+}
+func nonDowngrade(previous, current string) bool {
+	p, err := versionParts(previous)
+	if err != nil {
+		return false
+	}
+	c, err := versionParts(current)
+	if err != nil {
+		return false
+	}
+	for i := range p {
+		if p[i] < c[i] {
+			return true
+		}
+		if p[i] > c[i] {
+			return false
+		}
+	}
+	return true
 }

@@ -32,3 +32,12 @@ run = "go run ./cmd/dev-standards catalog"
 
 [tasks."security:check"]
 run = "go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./..."
+
+[tasks."session:verify"]
+run = "go run ./cmd/dev-standards session-verify"
+
+[tasks."standards:prepare"]
+run = "go run ./cmd/dev-standards prepare"
+
+[tasks."standards:finish"]
+run = "go run ./cmd/dev-standards finish"

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tqer39/dev-standards/internal/automation"
 	"github.com/tqer39/dev-standards/internal/engine"
 )
 
@@ -94,6 +95,14 @@ func TestExecutableLifecycleWithMise(t *testing.T) {
 		return out.Bytes()
 	}
 	initial := filepath.Join(sandbox, "initial.json")
+	audit := runProcess(binary, []string{"audit"}, 1)
+	if !bytes.Contains(audit, []byte(".editorconfig")) {
+		t.Fatal("missing EditorConfig was not discovered")
+	}
+	runProcess(binary, []string{"onboard", "--decision", "decision.md"}, 2)
+	if _, err := os.Stat(filepath.Join(target, ".standards/repository.yml")); !os.IsNotExist(err) {
+		t.Fatal("onboarding mutated before fleet validation")
+	}
 	runProcess(binary, []string{"inspect"}, 0)
 	runProcess(binary, []string{"adopt", "--profile", "go", "--decision", "decision.md", "--output", initial}, 1)
 	runProcess(binary, []string{"apply", "--plan", initial}, 0)
@@ -121,4 +130,22 @@ func TestExecutableLifecycleWithMise(t *testing.T) {
 	again := filepath.Join(sandbox, "again.json")
 	runProcess(binary, []string{"plan", "--output", again}, 0)
 	runProcess(binary, []string{"apply", "--plan", again}, 0)
+	fleet := filepath.Join(sandbox, "fleet.json")
+	config := automation.Default(automation.Entry{Path: source, Remote: filepath.Join(sandbox, "source.git"), Branch: "main", Role: "source"})
+	if err := automation.Save(fleet, config); err != nil {
+		t.Fatal(err)
+	}
+	runProcess("git", []string{"remote", "add", "origin", filepath.Join(sandbox, "project.git")}, 0)
+	runProcess(binary, []string{"onboard", "--fleet", fleet}, 0)
+	runProcess(binary, []string{"sync"}, 0)
+	runProcess(binary, []string{"audit"}, 0)
+	runProcess(binary, []string{"verify"}, 0)
+	if b := runProcess(binary, []string{"sync"}, 0); !bytes.Contains(b, []byte("applied 0 changes")) {
+		t.Fatal("sync is not idempotent")
+	}
+	registered, err := automation.Load(fleet)
+	if err != nil || len(registered.Projects) != 1 || !registered.Projects[0].Canary {
+		t.Fatal("initial enrollment was not saved")
+	}
+
 }

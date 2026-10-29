@@ -54,6 +54,10 @@ func (t *Tree) Verify(log io.Writer) (Report, error) {
 	if err != nil {
 		return r, err
 	}
+	fingerprint, err := t.Fingerprint()
+	if err != nil {
+		return r, err
+	}
 	r.Scope = "configuration-and-project-tasks"
 	for _, task := range []string{"lint", "format:check", "test", "build"} {
 		cmd := exec.Command("mise", "run", task)
@@ -71,6 +75,9 @@ func (t *Tree) Verify(log io.Writer) (Report, error) {
 			return r, fail(1, "project task failed: %s", task)
 		}
 		r.Results = append(r.Results, result)
+	}
+	if err := t.WriteReceipt(fingerprint); err != nil {
+		return r, err
 	}
 	return r, nil
 }

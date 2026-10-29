@@ -19,7 +19,7 @@ const vendorPath = ".standards/vendor/gitignore/go-linux-macos-windows.txt"
 const ignoreURL = "https://www.toptal.com/developers/gitignore/api/go,linux,macos,windows"
 
 var managedPaths = []string{".editorconfig", ".gitignore", ".gitattributes", "mise.toml", ".standards/tasks.standards.toml"}
-var reservedTasks = []string{"bootstrap", "lint", "format", "format:check", "test", "build", "check", "standards:plan", "standards:check", "standards:verify"}
+var reservedTasks = []string{"bootstrap", "lint", "format", "format:check", "test", "build", "check", "standards:plan", "standards:check", "standards:verify", "standards:prepare", "standards:finish"}
 
 func (t *Tree) Plan(req Request) (*Plan, error) {
 	if _, err := bundle.ResolveProfile("go"); err != nil {
@@ -47,10 +47,11 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		}
 	}
 	initial := req.Mode == "adopt"
+	upgrading := req.Mode == "upgrade"
 	if err := t.validateTaskDirectories(); err != nil {
 		return nil, err
 	}
-	if req.Mode != "adopt" && req.Mode != "reapply" {
+	if req.Mode != "adopt" && req.Mode != "reapply" && !upgrading {
 		return nil, fmt.Errorf("unknown plan mode")
 	}
 	var m Manifest
@@ -70,6 +71,31 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 			return nil, fmt.Errorf("repository.yml: %w", err)
 		}
 	}
+	previousAutomation := len(m.AI.Targets) > 0
+	if upgrading {
+		if !nonDowngrade(m.Standard.Version, bundle.Version) {
+			return nil, fmt.Errorf("automatic downgrades are forbidden")
+		}
+		previousVersion, _ := versionParts(m.Standard.Version)
+		currentVersion, _ := versionParts(bundle.Version)
+		if !m.Update.AllowMajor && previousVersion[0] != currentVersion[0] {
+			return nil, fmt.Errorf("major upgrades are disabled")
+		}
+		m.Standard.Version = bundle.Version
+	}
+	if req.Automation {
+		m.AI.Targets = []string{"codexcli"}
+		m.Update.Rollout = "standard"
+	}
+	managedPaths := append([]string{}, managedPaths...)
+	if len(m.AI.Targets) > 0 {
+		managedPaths = append(managedPaths, automationPaths...)
+	}
+	for _, name := range automationInputs {
+		if _, err := read(name); err != nil {
+			return nil, err
+		}
+	}
 	if err := t.validateLayout(); err != nil {
 		return nil, err
 	}
@@ -87,6 +113,8 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	}
 	if initial {
 		seed(".standards/repository.yml", string(JSON(m)))
+	} else if upgrading || req.Automation {
+		desired[".standards/repository.yml"] = file(string(JSON(m)))
 	}
 	if !p.Inputs[".standards/exceptions.yml"].Exists {
 		seed(".standards/exceptions.yml", "schemaVersion: 1\nexceptions: []\n")
@@ -150,12 +178,22 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		return nil, err
 	}
 	snapshot := bundle.Read("templates/base/gitignore.txt")
-	if p.Inputs[vendorPath].Exists && p.Inputs[vendorPath].Content != snapshot {
+	if upgrading {
+		var previous Lock
+		if err := strictJSON(p.Inputs[".standards/lock.json"].Content, &previous); err != nil {
+			return nil, err
+		}
+		if sum(p.Inputs[vendorPath].Content) != previous.GitignoreSHA256 {
+			return nil, fmt.Errorf("previous gitignore snapshot is not authentic")
+		}
+		desired[vendorPath] = file(snapshot)
+	}
+	if !upgrading && p.Inputs[vendorPath].Exists && p.Inputs[vendorPath].Content != snapshot {
 		return nil, fmt.Errorf("existing gitignore snapshot conflicts with the selected bundle")
 	}
 	if initial {
 		seed(vendorPath, snapshot)
-	} else if p.Inputs[vendorPath].Content != snapshot {
+	} else if !upgrading && p.Inputs[vendorPath].Content != snapshot {
 		return nil, fmt.Errorf("gitignore snapshot does not match the locked bundle")
 	}
 	var parsedMise struct {
@@ -170,17 +208,29 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		if err := strictJSON(p.Inputs[".standards/lock.json"].Content, &current); err != nil {
 			return nil, fmt.Errorf("lock.json: %w", err)
 		}
-		if current != lock {
+		if upgrading && (current.Repository != bundle.Repository || current.SchemaVersion != 1 || !nonDowngrade(current.Version, bundle.Version)) {
+			return nil, fmt.Errorf("untrusted previous lock")
+		}
+		if current != lock && !upgrading {
 			return nil, fmt.Errorf("lock does not match this CLI bundle; implicit updates are forbidden")
 		}
 	} else {
 		seed(".standards/lock.json", string(JSON(lock)))
+	}
+	if upgrading {
+		desired[".standards/lock.json"] = file(string(JSON(lock)))
 	}
 	desired[".editorconfig"] = file(bundle.Read("templates/base/editorconfig.txt") + "\n# リポジトリ固有の設定\n" + localEditor)
 	desired[".gitignore"] = file(snapshot + "\n# dev-standards\n/.standards/cache/\n/.standards/plans/\n/.dev-standards-apply.lock\n/bin/\n.env\n.env.*\n!.env.example\n\n# リポジトリ固有の設定\n" + ignoreLocal)
 	desired[".gitattributes"] = file(normalized(attributesLocal) + "\n# dev-standards: deterministic checkout\n*.go text eol=lf\ngo.mod text eol=lf\ngo.sum text eol=lf\n/.editorconfig text eol=lf\n/mise.toml text eol=lf\n/.gitattributes text eol=lf\n/.gitignore -text whitespace=-blank-at-eol\n/.standards/** text eol=lf\n/.standards/gitignore.local -text whitespace=-blank-at-eol\n/.standards/vendor/gitignore/*.txt -text whitespace=-blank-at-eol\n/docs/decisions/0001-language.md text eol=lf\n")
 	desired["mise.toml"] = file(rootMise)
 	desired[".standards/tasks.standards.toml"] = file(tasks())
+	if len(m.AI.Targets) > 0 {
+		if err := t.automationFiles(p, desired); err != nil {
+			return nil, err
+		}
+		desired[".standards/tasks.standards.toml"] = file(strings.ReplaceAll(tasks()+automationTasks(), "run = \"dev-standards ", "run = \"./.standards/cache/dev-standards "))
+	}
 	if err := validateIgnore(desired[".gitignore"].Content); err != nil {
 		return nil, err
 	}
@@ -189,17 +239,49 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		if err := strictJSON(p.Inputs[".standards/state.json"].Content, &state); err != nil {
 			return nil, err
 		}
-		if state.SchemaVersion != 1 || state.Bundle != bundle.Digest() || len(state.Files) != len(managedPaths) {
+		var previousLock Lock
+		if err := strictJSON(p.Inputs[".standards/lock.json"].Content, &previousLock); err != nil {
+			return nil, err
+		}
+		if state.Bundle != previousLock.Bundle {
+			return nil, fmt.Errorf("previous state and lock do not match")
+		}
+		if state.SchemaVersion != 1 || (!upgrading && state.Bundle != bundle.Digest()) || len(state.Files) < 5 {
 			return nil, fmt.Errorf("state has an unsupported version or ownership set")
 		}
-		for _, name := range managedPaths {
-			baseline, ok := state.Files[name]
-			if !ok || !baseline.Exists {
+		requiredOwnership := append([]string{}, []string{".editorconfig", ".gitignore", ".gitattributes", "mise.toml", ".standards/tasks.standards.toml"}...)
+		if previousAutomation {
+			requiredOwnership = append(requiredOwnership, automationPaths...)
+		}
+		for _, name := range requiredOwnership {
+			if _, ok := state.Files[name]; !ok {
+				return nil, fmt.Errorf("state is missing required ownership: %s", name)
+			}
+		}
+		for name, baseline := range state.Files {
+			if !contains(managedPaths, name) {
+				return nil, fmt.Errorf("unknown managed path in previous state: %s", name)
+			}
+			ok := baseline.Exists
+			if !ok {
 				return nil, fmt.Errorf("state is missing %s", name)
 			}
 			current := p.Inputs[name]
+			if _, exists := p.Inputs[name]; !exists {
+				if _, err := read(name); err != nil {
+					return nil, err
+				}
+				current = p.Inputs[name]
+			}
 			if !equal(current, baseline) && !t.committedDeletion(name, current) {
 				p.Conflicts = append(p.Conflicts, "managed file changed: "+name+"; move changes to its .standards source before reapplying")
+			}
+		}
+	}
+	for _, name := range managedPaths {
+		if _, exists := p.Inputs[name]; !exists {
+			if _, err := read(name); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -345,7 +427,7 @@ run = "dev-standards format-check"
 run = "go test ./..."
 
 [build]
-run = "go build ./..."
+run = "go build -o bin/ ./..."
 
 [check]
 depends = ["standards:check", "lint", "format:check", "test"]
@@ -382,7 +464,7 @@ func validateIgnore(content string) error {
 		}
 		return string(out), err
 	}
-	tracked := ".gitattributes\n.standards/gitattributes.local\n.standards/repository.yml\n.standards/lock.json\n.standards/state.json\n.standards/exceptions.yml\n.standards/gitignore.local\n.standards/editorconfig.local\n.standards/mise.project.toml\n.standards/tasks.project.toml\n.standards/tasks.standards.toml\n" + vendorPath + "\n.editorconfig\n.gitignore\nmise.toml\ngo.mod\ngo.sum\n" + decisionTarget + "\n"
+	tracked := "AGENTS.md\n.codex/hooks.json\n.github/workflows/dev-standards.yml\n.standards/rules.md\n.standards/agents.local.md\n.standards/hooks.local.json\n.gitattributes\n.standards/gitattributes.local\n.standards/repository.yml\n.standards/lock.json\n.standards/state.json\n.standards/exceptions.yml\n.standards/gitignore.local\n.standards/editorconfig.local\n.standards/mise.project.toml\n.standards/tasks.project.toml\n.standards/tasks.standards.toml\n" + vendorPath + "\n.editorconfig\n.gitignore\nmise.toml\ngo.mod\ngo.sum\n" + decisionTarget + "\n"
 	ignored, err := check(tracked)
 	if err != nil {
 		return err
@@ -390,11 +472,11 @@ func validateIgnore(content string) error {
 	if ignored != "" {
 		return fmt.Errorf("gitignore excludes required tracked files: %s", strings.TrimSpace(ignored))
 	}
-	ignored, err = check(".env\n.env.local\n.standards/plans/plan.json\n.dev-standards-apply.lock\n")
+	ignored, err = check(".env\n.env.local\n.standards/plans/plan.json\n.standards/cache/dev-standards\n.dev-standards-apply.lock\n")
 	if err != nil {
 		return err
 	}
-	if len(strings.Fields(ignored)) != 4 {
+	if len(strings.Fields(ignored)) != 5 {
 		return fmt.Errorf("local gitignore negates required private/temporary exclusions")
 	}
 	return nil

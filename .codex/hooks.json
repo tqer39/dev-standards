@@ -1,0 +1,8 @@
+{
+  "description": "dev-standards の固定された開始・終了確認。ルール更新時にこの定義を変更しない。",
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "\"$(git rev-parse --show-toplevel)/.standards/cache/dev-standards\" hook", "commandWindows": "powershell -NoProfile -Command \"& ((git rev-parse --show-toplevel) + '/.standards/cache/dev-standards.exe') hook\"", "timeout": 30}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "\"$(git rev-parse --show-toplevel)/.standards/cache/dev-standards\" hook", "commandWindows": "powershell -NoProfile -Command \"& ((git rev-parse --show-toplevel) + '/.standards/cache/dev-standards.exe') hook\"", "timeout": 30}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "\"$(git rev-parse --show-toplevel)/.standards/cache/dev-standards\" hook", "commandWindows": "powershell -NoProfile -Command \"& ((git rev-parse --show-toplevel) + '/.standards/cache/dev-standards.exe') hook\"", "timeout": 30}]}]
+  }
+}
