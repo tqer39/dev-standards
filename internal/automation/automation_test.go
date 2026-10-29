@@ -391,6 +391,10 @@ func TestCodexSavedLoginLive(t *testing.T) {
 	runGit(t, dir, "init", "--quiet")
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
+	status, err := (Exec{}).Run(ctx, dir, "codex", []string{"login", "status"}, "")
+	if err != nil || !strings.Contains(status, "ChatGPT") {
+		t.Fatalf("saved-login status was not detected: %q %v", status, err)
+	}
 	d, err := Agent(ctx, Exec{}, dir, "保存済み ChatGPT ログインでの無人実行を確認するテストです。ツールは呼ばず、ファイルを変更せず、approved=true、reason=既存ログインでの実行と構造化結果を確認した、として返してください。", true)
 	if err != nil {
 		t.Fatal(err)
@@ -487,5 +491,26 @@ func TestMaintenanceDoesNotUseAPIKeys(t *testing.T) {
 	}
 	if _, err = (Exec{}).Run(context.Background(), t.TempDir(), binary, []string{"-test.run=^TestMaintenanceDoesNotUseAPIKeys$"}, ""); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCodexLoginStatusOnStderr(t *testing.T) {
+	root := t.TempDir()
+	put(t, root, "status.go", `package main
+import ("fmt"; "os")
+func main(){fmt.Fprintln(os.Stderr,"Logged in using ChatGPT")}
+`)
+	name := "codex"
+	if runtimeWindows() {
+		name += ".exe"
+	}
+	cmd := exec.Command("go", "build", "-o", filepath.Join(root, name), filepath.Join(root, "status.go"))
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("status fixture: %s %v", b, err)
+	}
+	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
+	status, err := (Exec{}).Run(context.Background(), root, "codex", []string{"login", "status"}, "")
+	if err != nil || !strings.Contains(status, "ChatGPT") {
+		t.Fatalf("stderr status not detected: %q %v", status, err)
 	}
 }

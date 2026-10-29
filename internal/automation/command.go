@@ -48,6 +48,11 @@ func (e Exec) Run(ctx context.Context, dir, exe string, args []string, input str
 	if err := cmd.Run(); err != nil {
 		return out.String(), fmt.Errorf("%s failed: %w\nstdout: %s\nstderr: %s", exe, err, out.String(), stderr.String())
 	}
+	// Codex reports a successful login status on stderr. Keep other commands'
+	// stdout clean, since GitHub and agent responses are parsed as JSON.
+	if exe == "codex" && len(args) == 2 && args[0] == "login" && args[1] == "status" {
+		return out.String() + stderr.String(), nil
+	}
 	return out.String(), nil
 }
 func git(ctx context.Context, x Executor, dir string, args ...string) (string, error) {
