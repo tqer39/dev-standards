@@ -26,7 +26,7 @@ type Config struct {
 	MaxAttempts    int     `json:"maxAttempts"`
 }
 
-func Default(source Entry) Config { return Config{1, source, []Entry{}, 900, 32, 1200, 2} }
+func Default(source Entry) Config { return Config{1, source, []Entry{}, 1800, 32, 1200, 2} }
 func Load(name string) (Config, error) {
 	var c Config
 	f, err := os.Open(name)

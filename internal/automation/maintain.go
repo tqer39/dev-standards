@@ -154,6 +154,12 @@ func (m Maintainer) Run(ctx context.Context, c Config, state string) (Ledger, er
 			return finish(err)
 		}
 	} else {
+		if strings.HasPrefix(c.Source.Remote, "https://github.com/") {
+			repo := strings.TrimSuffix(strings.TrimPrefix(c.Source.Remote, "https://github.com/"), ".git")
+			if err = waitCI(ctx, x, source, repo, base, ".github/workflows/ci.yml"); err != nil {
+				return finish(err)
+			}
+		}
 		report.Outcomes = append(report.Outcomes, Outcome{c.Source.Remote, "unchanged", base, "validated"})
 	}
 	binary := filepath.Join(work, "dev-standards")
@@ -182,10 +188,8 @@ func (m Maintainer) Run(ctx context.Context, c Config, state string) (Ledger, er
 	if err = copyExecutable(binary, destination); err != nil {
 		return finish(err)
 	}
-	if len(changed) > 0 {
-		if err = tagRelease(ctx, x, source, c.Source); err != nil {
-			return finish(err)
-		}
+	if err = tagRelease(ctx, x, source, c.Source); err != nil {
+		return finish(err)
 	}
 	report.Bundle = digest
 	report.Executable = destination

@@ -25,11 +25,24 @@ type fakeCodex struct {
 	Calls          [][]string
 	Inputs         []string
 	SkipValidation bool
+	RemoteAlias    map[string]string
+	CIResponse     string
 }
 
 func (f *fakeCodex) Run(ctx context.Context, dir, exe string, args []string, input string) (string, error) {
 	f.Calls = append(f.Calls, append([]string{exe}, args...))
 	f.Inputs = append(f.Inputs, input)
+	if exe == "git" && len(f.RemoteAlias) > 0 {
+		args = append([]string{}, args...)
+		for i, arg := range args {
+			if local, ok := f.RemoteAlias[arg]; ok {
+				args[i] = local
+			}
+		}
+	}
+	if exe == "gh" && f.CIResponse != "" {
+		return f.CIResponse, nil
+	}
 	if exe == "mise" && f.SkipValidation {
 		return "passed", nil
 	}
@@ -534,5 +547,36 @@ func main(){fmt.Fprintln(os.Stderr,"Logged in using ChatGPT")}
 	status, err := (Exec{}).Run(context.Background(), root, "codex", []string{"login", "status"}, "")
 	if err != nil || !strings.Contains(status, "ChatGPT") {
 		t.Fatalf("stderr status not detected: %q %v", status, err)
+	}
+}
+
+func TestUnchangedSourceStillRequiresRemoteCI(t *testing.T) {
+	root := t.TempDir()
+	source, remote := filepath.Join(root, "source"), filepath.Join(root, "source.git")
+	bare(t, remote)
+	current, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	copySource(t, current, source)
+	repository(t, source, remote)
+	head := runGit(t, source, "rev-parse", "HEAD")
+	upstream := "https://github.com/example/standards.git"
+	fake := &fakeCodex{Changes: 1, SkipValidation: true, RemoteAlias: map[string]string{upstream: remote}, CIResponse: string(mustJSON(t, map[string]any{"workflow_runs": []any{map[string]any{"head_sha": head, "path": ".github/workflows/ci.yml", "status": "completed", "conclusion": "failure"}}}))}
+	c := Default(Entry{Path: source, Remote: upstream, Branch: "main", Role: "source"})
+	report, err := (Maintainer{Commands: fake}).Run(context.Background(), c, filepath.Join(root, "state"))
+	if err == nil || !strings.Contains(err.Error(), "CI did not succeed") {
+		t.Fatalf("remote CI bypass: %v", err)
+	}
+	if report.Executable != "" || !report.LearnedAt.IsZero() {
+		t.Fatal("unchecked source promoted")
+	}
+	for _, call := range fake.Calls {
+		if len(call) > 0 && call[0] == "go" {
+			t.Fatal("unchecked bundle built for rollout")
+		}
+	}
+	if tags := runGit(t, remote, "tag"); tags != "" {
+		t.Fatal("unchecked release tagged")
 	}
 }
