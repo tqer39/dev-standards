@@ -31,6 +31,7 @@ bin/dev-standards host-init --fleet .local/maintenance/fleet.json
 ```
 
 Windows の実行ファイル名は `bin/dev-standards.exe`。
+チェック用の npm ツールは mise の `npm.package_manager = "npm"` でインストールし、OS 間で依存関係の配置方法を揃える。
 `host-init` はリポジトリの origin を保守元として記録し、キャッシュに固定した起動口を配置する。
 台帳を既に作成している場合は上書きしない。
 ChatGPT ログインの認証情報はコピーせず、Codex 自身の保存済み認証を利用する。

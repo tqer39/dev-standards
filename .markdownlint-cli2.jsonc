@@ -1,6 +1,6 @@
 {
   "globs": ["**/*.md"],
-  "ignores": ["bin/**"],
+  "ignores": ["bin/**", ".local/**", ".standards/cache/**"],
   "config": {
     "default": true,
     "MD013": false
