@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "id": "python-uv",
+  "rules": [],
+  "platforms": ["macos", "linux", "windows"],
+  "tools": {"python": "3.13.0", "uv": "0.11.32"}
+}

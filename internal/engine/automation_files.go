@@ -18,7 +18,7 @@ func contains(xs []string, s string) bool {
 	}
 	return false
 }
-func (t *Tree) automationFiles(p *Plan, desired map[string]Snapshot) error {
+func (t *Tree) automationFiles(p *Plan, desired map[string]Snapshot, component Component) error {
 	var previous State
 	if p.Inputs[".standards/state.json"].Exists {
 		if err := strictJSON(p.Inputs[".standards/state.json"].Content, &previous); err != nil {
@@ -87,7 +87,7 @@ func (t *Tree) automationFiles(p *Plan, desired map[string]Snapshot) error {
 			return fmt.Errorf("existing dev-standards workflow needs ownership resolution")
 		}
 	}
-	desired[".github/workflows/dev-standards.yml"] = file(projectWorkflow)
+	desired[".github/workflows/dev-standards.yml"] = file(componentWorkflow(component))
 	return nil
 }
 func automationTasks() string {
@@ -100,8 +100,8 @@ run = "./.standards/cache/dev-standards finish"
 `
 }
 
-func automatedTasks() string {
-	raw := strings.ReplaceAll(tasks()+automationTasks(), "run = \"dev-standards ", "run = \"./.standards/cache/dev-standards ")
+func automatedTasksFor(base string) string {
+	raw := strings.ReplaceAll(base+automationTasks(), "run = \"dev-standards ", "run = \"./.standards/cache/dev-standards ")
 	var lines []string
 	for _, line := range strings.Split(raw, "\n") {
 		lines = append(lines, line)

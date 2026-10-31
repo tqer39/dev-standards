@@ -7,7 +7,8 @@
 
 ## この版の実装範囲
 
-初期版は、リポジトリのルートに Go module が１つある構成に対応します。
+Go はリポジトリのルートに module が１つある構成、Python/uv はルートまたは
+指定ディレクトリにビルド可能なパッケージが１つある構成に対応します。
 macOS、Linux、Windows で同じ CLI と mise タスクを使用します。
 
 - EditorConfig の配置と固有設定の保持
@@ -101,6 +102,31 @@ dev-standards verify
 `verify` は設定を確認したうえで、mise の lint、整形確認、test、build を実行します。
 言語選定の妥当性のレビューと、新規環境での bootstrap は別の証拠が必要なため、
 結果をそれぞれ `review_required`、`not_run` として明示します。
+
+## Python/uv の既存リポジトリへの適用
+
+`python-uv` は既存の `pyproject.toml` と `uv.lock` を使い、pytest、Ruff、uv build を実行します。
+uv workspace と複数パッケージには対応しません。既存の Python コードを Go に移す必要はありません。
+`mise.toml` の `tools.python` と `tools.uv` は、現在使っている版を完全な `x.y.z` で固定してください。
+pytest と Ruff は利用先の開発依存に含めます。言語選定記録には Python を採用した理由を記します。
+
+```sh
+dev-standards adopt --profile python-uv --component-path session-indexer --decision decision.md --output .standards/plans/adopt.json
+dev-standards apply --plan .standards/plans/adopt.json
+mise trust
+mise run bootstrap
+dev-standards verify
+```
+
+ルートのパッケージでは `--component-path` を省略できます。
+自律保守の初回導入も `onboard --profile python-uv --component-path session-indexer` で指定します。
+予約済みの `lint`、`test` などは計画を作る前に明示的に移行します。
+共通の検査を追加の固有検査で補う場合は `.standards/tasks.project.toml` に
+`project:lint`、`project:test`、`project:build` などを定義してください。
+対応する共通タスクの依存として実行し、共通検査は維持します。
+既存の運用タスクと Git hooks は保持します。
+Python と uv の固定値はロックへ保存し、検証でロックファイルを暗黙に更新しません。
+macOS、Linux、Windows で同じタスクを生成しますが、固有タスクの OS 対応は別途必要です。
 
 ## 再適用
 

@@ -2,7 +2,7 @@
 
 初回設定で対象、権限、予算を固定し、以後の通常のルール保守は人間の指示・承認を待たず進める。
 LLM の起動には保存済みの ChatGPT ログインを使い、OpenAI API キーを追加しない。
-初期実装の利用先は、ルートに Go module が１つあるリポジトリである。
+利用先は、ルートに Go module が１つ、または指定ディレクトリに Python/uv パッケージが１つあるリポジトリである。
 
 ## 実行の分担
 
@@ -48,6 +48,9 @@ ChatGPT ログインの認証情報はコピーせず、Codex 自身の保存済
 ```sh
 dev-standards onboard --repo /path/to/project --decision decision.md --fleet /path/to/dev-standards/.local/maintenance/fleet.json
 ```
+
+Python/uv では `--profile python-uv --component-path session-indexer` を追加する。
+既存の予約タスクは先に移行し、Python と uv は完全な版番号で固定する。
 
 `onboard` は初回適用、既存指示の保持、hooks と CI の配置、CLI キャッシュの準備、台帳への登録を行う。
 導入後の宣言、正本、生成物を通常の初回導入変更としてコミットし、利用先の既定ブランチに反映する。
