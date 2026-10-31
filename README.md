@@ -38,6 +38,7 @@ mise run check
 
 `mise run check` は、Go の静的解析、Markdown lint、整形確認、テスト、
 CLI のビルドを実行します。テストには実際の CLI と mise を使う受け入れテストも含まれます。
+Windows では保守検証のビルドを繰り返すため、通常テストの上限は20分、CI ジョブの上限は30分です。
 
 ```sh
 mise run test:race
