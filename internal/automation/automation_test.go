@@ -150,6 +150,42 @@ func copySource(t *testing.T, source, target string) {
 	}
 }
 
+func TestCopiedSourceInitializesIndependentRepository(t *testing.T) {
+	for _, worktree := range []bool{false, true} {
+		t.Run(fmt.Sprintf("worktree=%t", worktree), func(t *testing.T) {
+			root := t.TempDir()
+			source := filepath.Join(root, "source")
+			put(t, source, "tracked.txt", "original\n")
+			runGit(t, source, "init", "--quiet", "-b", "main")
+			runGit(t, source, "add", ".")
+			runGit(t, source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "source")
+			if worktree {
+				checkout := filepath.Join(root, "checkout")
+				runGit(t, source, "worktree", "add", "--quiet", "-b", "fixture", checkout)
+				source = checkout
+			}
+			head := runGit(t, source, "rev-parse", "HEAD")
+			target := filepath.Join(root, "copy")
+			copySource(t, source, target)
+			if _, err := os.Lstat(filepath.Join(target, ".git")); !os.IsNotExist(err) {
+				t.Fatalf("copied Git metadata: %v", err)
+			}
+			remote := filepath.Join(root, "copy.git")
+			bare(t, remote)
+			repository(t, target, remote)
+			put(t, target, "tracked.txt", "changed in copy\n")
+			runGit(t, target, "add", ".")
+			runGit(t, target, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "copy")
+			if got := runGit(t, source, "rev-parse", "HEAD"); got != head {
+				t.Fatalf("copy changed source HEAD: %s != %s", got, head)
+			}
+			if status := runGit(t, source, "status", "--porcelain"); status != "" {
+				t.Fatalf("copy changed source index or files: %s", status)
+			}
+		})
+	}
+}
+
 func TestFleetUpdatesSourceAndProjectWithoutHumanApproval(t *testing.T) {
 	if os.Getenv("DEV_STANDARDS_TEST_REENTRANT") == "1" {
 		t.Skip("the fleet source acceptance suite is already running in the outer process")
