@@ -39,10 +39,11 @@ func execute(args []string, out, errOut io.Writer) error {
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(errOut)
 	root := flags.String("repo", ".", "対象リポジトリのルート")
-	var output, profile, decision, planPath string
+	var output, profile, decision, planPath, componentPath string
 	switch command {
 	case "adopt":
-		flags.StringVar(&profile, "profile", "", "言語プロファイル。初期版は go")
+		flags.StringVar(&componentPath, "component-path", "", "単一コンポーネントの相対ディレクトリ。既定は .")
+		flags.StringVar(&profile, "profile", "", "言語プロファイル: go, python-uv")
 		flags.StringVar(&decision, "decision", "", "要件・候補・選定理由を記したリポジトリ相対の Markdown")
 		flags.StringVar(&output, "output", "", "計画の保存先。省略すると JSON を標準出力へ出力")
 	case "plan":
@@ -88,7 +89,7 @@ func execute(args []string, out, errOut io.Writer) error {
 	case "adopt", "plan":
 		req := engine.Request{Mode: "reapply"}
 		if command == "adopt" {
-			req = engine.Request{Mode: "adopt", Profile: profile, DecisionPath: decision}
+			req = engine.Request{Mode: "adopt", Profile: profile, DecisionPath: decision, ComponentPath: componentPath}
 		}
 		p, err := tree.Plan(req)
 		if err != nil {

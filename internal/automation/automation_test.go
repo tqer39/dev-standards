@@ -130,6 +130,9 @@ func copySource(t *testing.T, source, target string) {
 		if err != nil {
 			return err
 		}
+		if d.Name() == ".git" && !d.IsDir() {
+			return nil
+		}
 		if d.IsDir() {
 			if d.Name() == ".git" || d.Name() == "bin" || d.Name() == ".local" || rel == filepath.FromSlash(".standards/cache") {
 				return filepath.SkipDir
@@ -578,5 +581,18 @@ func TestUnchangedSourceStillRequiresRemoteCI(t *testing.T) {
 	}
 	if tags := runGit(t, remote, "tag"); tags != "" {
 		t.Fatal("unchecked release tagged")
+	}
+}
+
+func TestCopySourceSkipsWorktreeGitFile(t *testing.T) {
+	source, target := t.TempDir(), t.TempDir()
+	put(t, source, ".git", "gitdir: /original/repository/worktrees/checkout\n")
+	put(t, source, "README.md", "# source\n")
+	copySource(t, source, target)
+	if _, err := os.Stat(filepath.Join(target, ".git")); !os.IsNotExist(err) {
+		t.Fatal("copied worktree Git pointer")
+	}
+	if _, err := os.Stat(filepath.Join(target, "README.md")); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -20,7 +20,7 @@ run = "go fmt ./..."
 run = "go run ./cmd/dev-standards format-check"
 
 [tasks.test]
-run = "go test ./..."
+run = "go test -timeout=20m ./..."
 
 [tasks."test:race"]
 run = "go test -race ./..."

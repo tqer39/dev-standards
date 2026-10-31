@@ -56,15 +56,22 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	}
 	var m Manifest
 	if initial {
-		if req.Profile != "go" {
-			return nil, fmt.Errorf("initial release supports --profile go")
+		if req.Profile != "go" && req.Profile != "python-uv" {
+			return nil, fmt.Errorf("supported profiles: go, python-uv")
 		}
 		if p.Inputs[".standards/repository.yml"].Exists || p.Inputs[".standards/state.json"].Exists || p.Inputs[".standards/lock.json"].Exists || p.Inputs[".standards/tasks.standards.toml"].Exists {
 			return nil, fmt.Errorf("repository already adopted; use plan")
 		}
 		m = defaultManifest()
+		if req.ComponentPath != "" {
+			m.Components[0].Path = req.ComponentPath
+		}
+		m.Components[0].Profile = req.Profile
+		if req.Profile == "python-uv" {
+			m.Gitignore.Templates[0] = "python"
+		}
 	} else {
-		if req.Profile != "" || req.DecisionPath != "" {
+		if req.Profile != "" || req.DecisionPath != "" || req.ComponentPath != "" {
 			return nil, fmt.Errorf("reapply does not accept adoption options")
 		}
 		if err := bundle.Decode([]byte(p.Inputs[".standards/repository.yml"].Content), "repository", &m); err != nil {
@@ -96,13 +103,26 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 			return nil, err
 		}
 	}
-	if err := t.validateLayout(); err != nil {
-		return nil, err
-	}
 	if err := validateManifest(m); err != nil {
 		return nil, err
 	}
-	if !p.Inputs["go.mod"].Exists {
+	component := m.Components[0]
+	if err := t.validateLayoutFor(component); err != nil {
+		return nil, err
+	}
+	vendorPath, ignoreURL := vendorPath, ignoreURL
+	if component.Profile == "python-uv" {
+		vendorPath = ".standards/vendor/gitignore/python-linux-macos-windows.txt"
+		ignoreURL = "https://www.toptal.com/developers/gitignore/api/python,linux,macos,windows"
+		for _, name := range []string{vendorPath, componentFile(component, "pyproject.toml"), componentFile(component, "uv.lock")} {
+			if _, err := read(name); err != nil {
+				return nil, err
+			}
+		}
+		if err := validatePythonInputs(p, component); err != nil {
+			return nil, err
+		}
+	} else if !p.Inputs["go.mod"].Exists {
 		return nil, fmt.Errorf("a Go module is required before adoption")
 	}
 	desired := map[string]Snapshot{}
@@ -137,7 +157,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		decision = p.Inputs[req.DecisionPath].Content
 		seed(decisionTarget, decision)
 	}
-	if err := languageDecision(decision); err != nil {
+	if err := languageDecisionFor(decision, component.Profile); err != nil {
 		return nil, err
 	}
 
@@ -161,7 +181,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 			}
 		}
 	}
-	localEditor, err := cleanLocalEditor(editorLocal)
+	localEditor, err := cleanLocalEditorFor(editorLocal, component.Profile)
 	if err != nil {
 		return nil, err
 	}
@@ -173,11 +193,14 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	if err := validateProjectTasks(p.Inputs[".standards/tasks.project.toml"].Content); err != nil {
 		return nil, err
 	}
-	rootMise, err := renderMise(miseLocal)
+	rootMise, err := renderMiseFor(miseLocal, component.Profile)
 	if err != nil {
 		return nil, err
 	}
 	snapshot := bundle.Read("templates/base/gitignore.txt")
+	if component.Profile == "python-uv" {
+		snapshot = bundle.Read("templates/base/gitignore-python.txt")
+	}
 	if upgrading {
 		var previous Lock
 		if err := strictJSON(p.Inputs[".standards/lock.json"].Content, &previous); err != nil {
@@ -202,7 +225,11 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	if _, err := toml.Decode(rootMise, &parsedMise); err != nil {
 		return nil, err
 	}
-	lock := Lock{1, bundle.Repository, bundle.Version, bundle.Digest(), sum(snapshot), ignoreURL, parsedMise.Tools["go"]}
+	lock := Lock{SchemaVersion: 1, Repository: bundle.Repository, Version: bundle.Version, Bundle: bundle.Digest(), GitignoreSHA256: sum(snapshot), GitignoreURL: ignoreURL, GoVersion: parsedMise.Tools["go"]}
+	if component.Profile == "python-uv" {
+		lock.PythonVersion = parsedMise.Tools["python"]
+		lock.UVVersion = parsedMise.Tools["uv"]
+	}
 	if !initial {
 		var current Lock
 		if err := strictJSON(p.Inputs[".standards/lock.json"].Content, &current); err != nil {
@@ -223,15 +250,25 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	desired[".editorconfig"] = file(bundle.Read("templates/base/editorconfig.txt") + "\n# リポジトリ固有の設定\n" + localEditor)
 	desired[".gitignore"] = file(snapshot + "\n# dev-standards\n/.standards/cache/\n/.standards/plans/\n/.dev-standards-apply.lock\n/bin/\n.env\n.env.*\n!.env.example\n\n# リポジトリ固有の設定\n" + ignoreLocal)
 	desired[".gitattributes"] = file(normalized(attributesLocal) + "\n# dev-standards: deterministic checkout\n*.go text eol=lf\ngo.mod text eol=lf\ngo.sum text eol=lf\n/.editorconfig text eol=lf\n/mise.toml text eol=lf\n/.gitattributes text eol=lf\n/AGENTS.md text eol=lf\n/.codex/hooks.json text eol=lf\n/.github/workflows/dev-standards.yml text eol=lf\n/.gitignore -text whitespace=-blank-at-eol\n/.standards/** text eol=lf\n/.standards/gitignore.local -text whitespace=-blank-at-eol\n/.standards/vendor/gitignore/*.txt -text whitespace=-blank-at-eol\n/docs/decisions/0001-language.md text eol=lf\n")
+	if component.Profile == "python-uv" {
+		desired[".editorconfig"] = file(bundle.Read("templates/base/editorconfig.txt") + "\n[*.py]\nindent_size = 4\n\n# リポジトリ固有の設定\n" + localEditor)
+		attrs := desired[".gitattributes"]
+		attrs.Content = strings.Replace(attrs.Content, "*.go text eol=lf\ngo.mod text eol=lf\ngo.sum text eol=lf", "*.py text eol=lf\n"+componentFile(component, "pyproject.toml")+" text eol=lf\n"+componentFile(component, "uv.lock")+" text eol=lf", 1)
+		desired[".gitattributes"] = attrs
+	}
 	desired["mise.toml"] = file(rootMise)
-	desired[".standards/tasks.standards.toml"] = file(tasks())
+	desired[".standards/tasks.standards.toml"] = file(componentTasks(component, p.Inputs[".standards/tasks.project.toml"].Content))
 	if len(m.AI.Targets) > 0 {
-		if err := t.automationFiles(p, desired); err != nil {
+		if err := t.automationFiles(p, desired, component); err != nil {
 			return nil, err
 		}
-		desired[".standards/tasks.standards.toml"] = file(automatedTasks())
+		desired[".standards/tasks.standards.toml"] = file(automatedTasksFor(componentTasks(component, p.Inputs[".standards/tasks.project.toml"].Content)))
 	}
-	if err := validateIgnore(desired[".gitignore"].Content); err != nil {
+	required := []string{vendorPath}
+	if component.Profile == "python-uv" {
+		required = append(required, componentFile(component, "pyproject.toml"), componentFile(component, "uv.lock"))
+	}
+	if err := validateIgnore(desired[".gitignore"].Content, required...); err != nil {
 		return nil, err
 	}
 	var state State
@@ -353,7 +390,7 @@ func validateProjectTasks(s string) error {
 	}
 	return nil
 }
-func renderMise(local string) (string, error) {
+func renderMiseFor(local, profileID string) (string, error) {
 	local = normalized(local)
 	var cfg map[string]any
 	meta, err := toml.Decode(local, &cfg)
@@ -372,7 +409,11 @@ func renderMise(local string) (string, error) {
 	if s != "" && !strings.HasSuffix(s, "\n") {
 		s += "\n"
 	}
-	if !meta.IsDefined("tools", "go") {
+	if profileID == "python-uv" {
+		if err := validatePythonTools(cfg); err != nil {
+			return "", err
+		}
+	} else if !meta.IsDefined("tools", "go") {
 		if meta.IsDefined("tools") {
 			return "", fmt.Errorf("add an explicit pinned tools.go to the existing tools table before adoption")
 		}
@@ -444,7 +485,7 @@ run = "dev-standards verify"
 `
 }
 
-func validateIgnore(content string) error {
+func validateIgnore(content string, required ...string) error {
 	dir, err := os.MkdirTemp("", "dev-standards-ignore-")
 	if err != nil {
 		return err
@@ -466,6 +507,7 @@ func validateIgnore(content string) error {
 		return string(out), err
 	}
 	tracked := "AGENTS.md\n.codex/hooks.json\n.github/workflows/dev-standards.yml\n.standards/rules.md\n.standards/agents.local.md\n.standards/hooks.local.json\n.gitattributes\n.standards/gitattributes.local\n.standards/repository.yml\n.standards/lock.json\n.standards/state.json\n.standards/exceptions.yml\n.standards/gitignore.local\n.standards/editorconfig.local\n.standards/mise.project.toml\n.standards/tasks.project.toml\n.standards/tasks.standards.toml\n" + vendorPath + "\n.editorconfig\n.gitignore\nmise.toml\ngo.mod\ngo.sum\n" + decisionTarget + "\n"
+	tracked += strings.Join(required, "\n") + "\n"
 	ignored, err := check(tracked)
 	if err != nil {
 		return err
@@ -519,7 +561,7 @@ func (t *Tree) committedDeletion(name string, current Snapshot) bool {
 	return err == nil && len(b) == 0
 }
 
-func (t *Tree) validateLayout() error {
+func (t *Tree) validateLayoutFor(component Component) error {
 	return fs.WalkDir(t.fs.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -532,8 +574,12 @@ func (t *Tree) validateLayout() error {
 		}
 		switch d.Name() {
 		case "go.mod":
-			if p != "go.mod" {
+			if p != "go.mod" || component.Profile != "go" {
 				return fmt.Errorf("nested Go module needs a separate profile: %s", p)
+			}
+		case "pyproject.toml":
+			if component.Profile != "python-uv" || p != componentFile(component, "pyproject.toml") {
+				return fmt.Errorf("additional Python component is unsupported: %s", p)
 			}
 		case "package.json", "Cargo.toml", "Package.swift":
 			return fmt.Errorf("additional language needs a separate profile: %s", p)

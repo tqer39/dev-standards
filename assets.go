@@ -198,7 +198,7 @@ type Profile struct {
 
 // ResolveProfile validates both shared and language-specific references.
 func ResolveProfile(id string) (Profile, error) {
-	if id != "go" {
+	if id != "go" && id != "python-uv" {
 		return Profile{}, fmt.Errorf("unsupported profile: %s", id)
 	}
 	rules, err := Catalog()
@@ -213,7 +213,7 @@ func ResolveProfile(id string) (Profile, error) {
 	if err := Decode([]byte(Read("profiles/base.yml")), "profile", &base); err != nil {
 		return p, err
 	}
-	if err := Decode([]byte(Read("profiles/go.yml")), "profile", &p); err != nil {
+	if err := Decode([]byte(Read("profiles/"+id+".yml")), "profile", &p); err != nil {
 		return p, err
 	}
 	if base.ID != "base" || p.ID != id {
@@ -230,8 +230,11 @@ func ResolveProfile(id string) (Profile, error) {
 	if len(seen) != len(known) {
 		return p, fmt.Errorf("basic profile must select all current rules")
 	}
-	if p.Tools["go"] == "" {
+	if id == "go" && p.Tools["go"] == "" {
 		return p, fmt.Errorf("Go profile must pin its tool")
+	}
+	if id == "python-uv" && (p.Tools["python"] == "" || p.Tools["uv"] == "") {
+		return p, fmt.Errorf("Python profile must pin python and uv")
 	}
 	return p, nil
 }

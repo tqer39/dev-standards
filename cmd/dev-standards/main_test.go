@@ -149,3 +149,63 @@ func TestExecutableLifecycleWithMise(t *testing.T) {
 	}
 
 }
+
+func TestPythonCLIPlanAndOnboard(t *testing.T) {
+	target := t.TempDir()
+	if b, err := exec.Command("git", "-C", target, "init", "--quiet").CombinedOutput(); err != nil {
+		t.Fatalf("%s %v", b, err)
+	}
+	for name, content := range map[string]string{
+		"pyproject.toml": "[project]\nname='sample'\n[build-system]\nbuild-backend='hatchling.build'\n",
+		"uv.lock":        "version=1\n",
+		"mise.toml":      "[tools]\npython='3.13.0'\nuv='0.11.32'\n",
+		"decision.md":    languageRecord,
+	} {
+		if err := os.WriteFile(filepath.Join(target, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	invoke := func(want int, args ...string) []byte {
+		t.Helper()
+		var out, log bytes.Buffer
+		args = append(args, "--repo", target)
+		if got := run(args, &out, &log); got != want {
+			t.Fatalf("%v: got %d want %d: %s", args, got, want, log.String())
+		}
+		return out.Bytes()
+	}
+	inspection := invoke(0, "inspect")
+	if !bytes.Contains(inspection, []byte(`"python"`)) {
+		t.Fatal("Python not discovered")
+	}
+	planPath := filepath.Join(t.TempDir(), "plan.json")
+	invoke(1, "adopt", "--profile", "python-uv", "--component-path", ".", "--decision", "decision.md", "--output", planPath)
+	invoke(0, "apply", "--plan", planPath)
+	invoke(0, "plan")
+	// Onboard selects the same Python profile for a fresh package.
+	fresh := t.TempDir()
+	for _, name := range []string{"pyproject.toml", "uv.lock", "decision.md"} {
+		b, _ := os.ReadFile(filepath.Join(target, name))
+		if err := os.WriteFile(filepath.Join(fresh, name), b, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(fresh, "mise.toml"), []byte("[tools]\npython='3.13.0'\nuv='0.11.32'\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "--quiet"}, {"remote", "add", "origin", "https://github.com/example/python"}} {
+		if b, err := exec.Command("git", append([]string{"-C", fresh}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("%s %v", b, err)
+		}
+	}
+	fleet := filepath.Join(t.TempDir(), "fleet.json")
+	source, _ := filepath.Abs("../..")
+	if err := automation.Save(fleet, automation.Default(automation.Entry{Path: source, Remote: "https://github.com/example/source", Branch: "main", Role: "source"})); err != nil {
+		t.Fatal(err)
+	}
+	target = fresh
+	invoke(0, "onboard", "--profile", "python-uv", "--decision", "decision.md", "--fleet", fleet)
+	if b := invoke(0, "sync"); !bytes.Contains(b, []byte("applied 0 changes")) {
+		t.Fatal("Python onboard/sync is not idempotent")
+	}
+}
