@@ -8,7 +8,22 @@ import (
 )
 
 var automationPaths = []string{"AGENTS.md", ".codex/hooks.json", ".standards/rules.md", ".github/workflows/dev-standards.yml"}
-var automationInputs = []string{"AGENTS.md", ".codex/hooks.json", ".standards/agents.local.md", ".standards/hooks.local.json", ".standards/rules.md", ".github/workflows/dev-standards.yml"}
+var automationInputs = []string{"AGENTS.md", ".codex/hooks.json", ".standards/agents.local.md", ".standards/hooks.local.json", ".standards/rules.md", ".github/workflows/dev-standards.yml", rulesyncEntryPath}
+
+// With rulesync, AGENTS.md stays a rulesync output and the shared entry is
+// delivered as a rulesync rule instead.
+const rulesyncEntryPath = ".rulesync/rules/dev-standards.md"
+
+const agentsEntry = "# 共通開発ルール\n\n作業開始時に `.standards/rules.md` を読み、`mise run standards:prepare` を実行する。\n作業終了前に `mise run standards:finish` を実行する。\n不足する設定は整備し、共通ルールの問題は `dev-standards feedback` で記録する。\n共通ルールの保守に人間の追加指示・承認を待たず、設定済みの自律保守に引き継ぐ。\n"
+
+func automationPathsFor(m Manifest) []string {
+	if m.AI.Instructions != "rulesync" {
+		return automationPaths
+	}
+	paths := append([]string{}, automationPaths...)
+	paths[0] = rulesyncEntryPath
+	return paths
+}
 
 func contains(xs []string, s string) bool {
 	for _, x := range xs {
@@ -18,22 +33,31 @@ func contains(xs []string, s string) bool {
 	}
 	return false
 }
-func (t *Tree) automationFiles(p *Plan, desired map[string]Snapshot, component Component) error {
+func (t *Tree) automationFiles(p *Plan, desired map[string]Snapshot, m Manifest) error {
 	var previous State
 	if p.Inputs[".standards/state.json"].Exists {
 		if err := strictJSON(p.Inputs[".standards/state.json"].Content, &previous); err != nil {
 			return err
 		}
 	}
-	local := p.Inputs[".standards/agents.local.md"]
-	if !local.Exists {
-		local = file(normalized(p.Inputs["AGENTS.md"].Content))
-		if _, owned := previous.Files["AGENTS.md"]; owned {
-			return fmt.Errorf("AGENTS source missing")
+	if m.AI.Instructions == "rulesync" {
+		if old := p.Inputs[rulesyncEntryPath]; old.Exists {
+			if _, owned := previous.Files[rulesyncEntryPath]; !owned {
+				return fmt.Errorf("existing %s needs ownership resolution", rulesyncEntryPath)
+			}
 		}
-		desired[".standards/agents.local.md"] = local
+		desired[rulesyncEntryPath] = file("---\nroot: false\ntargets: [\"*\"]\ndescription: dev-standards の共通開発ルールの入口\nglobs: [\"**/*\"]\n---\n\n" + agentsEntry)
+	} else {
+		local := p.Inputs[".standards/agents.local.md"]
+		if !local.Exists {
+			local = file(normalized(p.Inputs["AGENTS.md"].Content))
+			if _, owned := previous.Files["AGENTS.md"]; owned {
+				return fmt.Errorf("AGENTS source missing")
+			}
+			desired[".standards/agents.local.md"] = local
+		}
+		desired["AGENTS.md"] = file(strings.TrimRight(normalized(local.Content), "\n") + "\n\n" + agentsEntry)
 	}
-	desired["AGENTS.md"] = file(strings.TrimRight(normalized(local.Content), "\n") + "\n\n# 共通開発ルール\n\n作業開始時に `.standards/rules.md` を読み、`mise run standards:prepare` を実行する。\n作業終了前に `mise run standards:finish` を実行する。\n不足する設定は整備し、共通ルールの問題は `dev-standards feedback` で記録する。\n共通ルールの保守に人間の追加指示・承認を待たず、設定済みの自律保守に引き継ぐ。\n")
 	desired[".standards/rules.md"] = file("# 共通ルール\n\nEditorConfig、gitignore.io の採用入力、mise の作業入口を維持する。\n要件・言語選定記録を参照し、変更に対応した静的解析、整形、テストを実行する。\n生成物は直接編集せず `.standards` の正本を編集して再適用する。\n実行していない検査を成功と報告しない。\n更新は検証済みの版を採用し、作業中の入力と無関係な変更を保持する。\nルールの重複・矛盾・古い判断は根拠とともに保守へ記録する。\n")
 	hooks := map[string]any{}
 	raw := p.Inputs[".standards/hooks.local.json"]
@@ -87,7 +111,7 @@ func (t *Tree) automationFiles(p *Plan, desired map[string]Snapshot, component C
 			return fmt.Errorf("existing dev-standards workflow needs ownership resolution")
 		}
 	}
-	desired[".github/workflows/dev-standards.yml"] = file(componentWorkflow(component))
+	desired[".github/workflows/dev-standards.yml"] = file(componentWorkflow(m))
 	return nil
 }
 func automationTasks() string {

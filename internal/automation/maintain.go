@@ -383,7 +383,7 @@ func guardProject(dir string, paths []string, c Config, cfg []byte) error {
 	}
 	for _, p := range paths {
 		allowed := strings.HasPrefix(p, ".standards/") && !strings.HasPrefix(p, ".standards/cache/")
-		for _, name := range []string{"AGENTS.md", ".codex/hooks.json", ".editorconfig", ".gitignore", ".gitattributes", "mise.toml", ".github/workflows/dev-standards.yml"} {
+		for _, name := range []string{"AGENTS.md", ".rulesync/rules/dev-standards.md", ".codex/hooks.json", ".editorconfig", ".gitignore", ".gitattributes", "mise.toml", ".github/workflows/dev-standards.yml"} {
 			allowed = allowed || p == name
 		}
 		if !allowed {

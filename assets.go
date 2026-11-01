@@ -17,7 +17,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-const Version = "0.2.3"
+const Version = "0.3.0"
 const Repository = "tqer39/dev-standards"
 
 //go:embed schemas rules guidance profiles templates
@@ -198,7 +198,7 @@ type Profile struct {
 
 // ResolveProfile validates both shared and language-specific references.
 func ResolveProfile(id string) (Profile, error) {
-	if id != "go" && id != "python-uv" {
+	if id != "go" && id != "python-uv" && id != "node-npm" {
 		return Profile{}, fmt.Errorf("unsupported profile: %s", id)
 	}
 	rules, err := Catalog()
@@ -235,6 +235,9 @@ func ResolveProfile(id string) (Profile, error) {
 	}
 	if id == "python-uv" && (p.Tools["python"] == "" || p.Tools["uv"] == "") {
 		return p, fmt.Errorf("Python profile must pin python and uv")
+	}
+	if id == "node-npm" && p.Tools["node"] == "" {
+		return p, fmt.Errorf("Node profile must pin node")
 	}
 	return p, nil
 }

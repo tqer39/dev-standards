@@ -56,8 +56,11 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	}
 	var m Manifest
 	if initial {
-		if req.Profile != "go" && req.Profile != "python-uv" {
-			return nil, fmt.Errorf("supported profiles: go, python-uv")
+		if req.Profile != "go" && req.Profile != "python-uv" && req.Profile != "node-npm" {
+			return nil, fmt.Errorf("supported profiles: go, python-uv, node-npm")
+		}
+		if req.Instructions != "" && req.Instructions != "rulesync" {
+			return nil, fmt.Errorf("supported instruction generators: rulesync")
 		}
 		if p.Inputs[".standards/repository.yml"].Exists || p.Inputs[".standards/state.json"].Exists || p.Inputs[".standards/lock.json"].Exists || p.Inputs[".standards/tasks.standards.toml"].Exists {
 			return nil, fmt.Errorf("repository already adopted; use plan")
@@ -67,11 +70,10 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 			m.Components[0].Path = req.ComponentPath
 		}
 		m.Components[0].Profile = req.Profile
-		if req.Profile == "python-uv" {
-			m.Gitignore.Templates[0] = "python"
-		}
+		m.Gitignore.Templates[0] = profileLanguage(req.Profile)
+		m.AI.Instructions = req.Instructions
 	} else {
-		if req.Profile != "" || req.DecisionPath != "" || req.ComponentPath != "" {
+		if req.Profile != "" || req.DecisionPath != "" || req.ComponentPath != "" || req.Instructions != "" {
 			return nil, fmt.Errorf("reapply does not accept adoption options")
 		}
 		if err := bundle.Decode([]byte(p.Inputs[".standards/repository.yml"].Content), "repository", &m); err != nil {
@@ -96,7 +98,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	}
 	managedPaths := append([]string{}, managedPaths...)
 	if len(m.AI.Targets) > 0 {
-		managedPaths = append(managedPaths, automationPaths...)
+		managedPaths = append(managedPaths, automationPathsFor(m)...)
 	}
 	for _, name := range automationInputs {
 		if _, err := read(name); err != nil {
@@ -111,15 +113,25 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		return nil, err
 	}
 	vendorPath, ignoreURL := vendorPath, ignoreURL
-	if component.Profile == "python-uv" {
-		vendorPath = ".standards/vendor/gitignore/python-linux-macos-windows.txt"
-		ignoreURL = "https://www.toptal.com/developers/gitignore/api/python,linux,macos,windows"
-		for _, name := range []string{vendorPath, componentFile(component, "pyproject.toml"), componentFile(component, "uv.lock")} {
+	language := profileLanguage(component.Profile)
+	if component.Profile != "go" {
+		vendorPath = ".standards/vendor/gitignore/" + language + "-linux-macos-windows.txt"
+		ignoreURL = "https://www.toptal.com/developers/gitignore/api/" + language + ",linux,macos,windows"
+		if _, err := read(vendorPath); err != nil {
+			return nil, err
+		}
+		for _, name := range componentInputs(component) {
 			if _, err := read(name); err != nil {
 				return nil, err
 			}
 		}
+	}
+	if component.Profile == "python-uv" {
 		if err := validatePythonInputs(p, component); err != nil {
+			return nil, err
+		}
+	} else if component.Profile == "node-npm" {
+		if err := validateNodeInputs(p, component); err != nil {
 			return nil, err
 		}
 	} else if !p.Inputs["go.mod"].Exists {
@@ -198,8 +210,8 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		return nil, err
 	}
 	snapshot := bundle.Read("templates/base/gitignore.txt")
-	if component.Profile == "python-uv" {
-		snapshot = bundle.Read("templates/base/gitignore-python.txt")
+	if component.Profile != "go" {
+		snapshot = bundle.Read("templates/base/gitignore-" + language + ".txt")
 	}
 	if upgrading {
 		var previous Lock
@@ -230,6 +242,9 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		lock.PythonVersion = parsedMise.Tools["python"]
 		lock.UVVersion = parsedMise.Tools["uv"]
 	}
+	if component.Profile == "node-npm" {
+		lock.NodeVersion = parsedMise.Tools["node"]
+	}
 	if !initial {
 		var current Lock
 		if err := strictJSON(p.Inputs[".standards/lock.json"].Content, &current); err != nil {
@@ -256,17 +271,27 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		attrs.Content = strings.Replace(attrs.Content, "*.go text eol=lf\ngo.mod text eol=lf\ngo.sum text eol=lf", "*.py text eol=lf\n"+componentFile(component, "pyproject.toml")+" text eol=lf\n"+componentFile(component, "uv.lock")+" text eol=lf", 1)
 		desired[".gitattributes"] = attrs
 	}
+	if component.Profile == "node-npm" {
+		attrs := desired[".gitattributes"]
+		attrs.Content = strings.Replace(attrs.Content, "*.go text eol=lf\ngo.mod text eol=lf\ngo.sum text eol=lf", "*.js text eol=lf\n*.mjs text eol=lf\n*.cjs text eol=lf\n*.ts text eol=lf\n*.tsx text eol=lf\n"+componentFile(component, "package.json")+" text eol=lf\n"+componentFile(component, "package-lock.json")+" text eol=lf", 1)
+		desired[".gitattributes"] = attrs
+	}
+	if m.AI.Instructions == "rulesync" && len(m.AI.Targets) > 0 {
+		attrs := desired[".gitattributes"]
+		attrs.Content += "/" + rulesyncEntryPath + " text eol=lf\n"
+		desired[".gitattributes"] = attrs
+	}
 	desired["mise.toml"] = file(rootMise)
 	desired[".standards/tasks.standards.toml"] = file(componentTasks(component, p.Inputs[".standards/tasks.project.toml"].Content))
 	if len(m.AI.Targets) > 0 {
-		if err := t.automationFiles(p, desired, component); err != nil {
+		if err := t.automationFiles(p, desired, m); err != nil {
 			return nil, err
 		}
 		desired[".standards/tasks.standards.toml"] = file(automatedTasksFor(componentTasks(component, p.Inputs[".standards/tasks.project.toml"].Content)))
 	}
-	required := []string{vendorPath}
-	if component.Profile == "python-uv" {
-		required = append(required, componentFile(component, "pyproject.toml"), componentFile(component, "uv.lock"))
+	required := append([]string{vendorPath}, componentInputs(component)...)
+	if len(m.AI.Targets) > 0 {
+		required = append(required, automationPathsFor(m)...)
 	}
 	if err := validateIgnore(desired[".gitignore"].Content, required...); err != nil {
 		return nil, err
@@ -288,7 +313,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		}
 		requiredOwnership := append([]string{}, []string{".editorconfig", ".gitignore", ".gitattributes", "mise.toml", ".standards/tasks.standards.toml"}...)
 		if previousAutomation {
-			requiredOwnership = append(requiredOwnership, automationPaths...)
+			requiredOwnership = append(requiredOwnership, automationPathsFor(m)...)
 		}
 		for _, name := range requiredOwnership {
 			if _, ok := state.Files[name]; !ok {
@@ -411,6 +436,10 @@ func renderMiseFor(local, profileID string) (string, error) {
 	}
 	if profileID == "python-uv" {
 		if err := validatePythonTools(cfg); err != nil {
+			return "", err
+		}
+	} else if profileID == "node-npm" {
+		if err := validateNodeTools(cfg); err != nil {
 			return "", err
 		}
 	} else if !meta.IsDefined("tools", "go") {
@@ -581,7 +610,11 @@ func (t *Tree) validateLayoutFor(component Component) error {
 			if component.Profile != "python-uv" || p != componentFile(component, "pyproject.toml") {
 				return fmt.Errorf("additional Python component is unsupported: %s", p)
 			}
-		case "package.json", "Cargo.toml", "Package.swift":
+		case "package.json":
+			if component.Profile != "node-npm" || p != componentFile(component, "package.json") {
+				return fmt.Errorf("additional Node package is unsupported: %s", p)
+			}
+		case "Cargo.toml", "Package.swift":
 			return fmt.Errorf("additional language needs a separate profile: %s", p)
 		}
 		return nil
