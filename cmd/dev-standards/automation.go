@@ -21,7 +21,8 @@ func automationCommand(command string, args []string, out, errOut io.Writer) err
 	flags.SetOutput(errOut)
 	repo := flags.String("repo", ".", "対象リポジトリ")
 	fleet := flags.String("fleet", "", "初回設定で固定する保守台帳 JSON")
-	profile := flags.String("profile", "go", "言語プロファイル: go, python-uv")
+	profile := flags.String("profile", "go", "言語プロファイル: go, python-uv, node-npm")
+	instructions := flags.String("instructions", "", "AGENTS.md を生成する外部ツール: rulesync。省略すると dev-standards が管理")
 	componentPath := flags.String("component-path", "", "単一コンポーネントの相対ディレクトリ")
 	decision := flags.String("decision", "", "言語選定記録")
 	rule := flags.String("rule", "observation", "問題に関係するルール")
@@ -197,7 +198,7 @@ func automationCommand(command string, args []string, out, errOut io.Writer) err
 			if command == "sync" {
 				return fmt.Errorf("initial onboarding is required")
 			}
-			req = engine.Request{Mode: "adopt", Profile: *profile, ComponentPath: *componentPath, DecisionPath: *decision, Automation: true}
+			req = engine.Request{Mode: "adopt", Profile: *profile, ComponentPath: *componentPath, DecisionPath: *decision, Instructions: *instructions, Automation: true}
 		}
 		plan, err := tree.Plan(req)
 		if err != nil {

@@ -53,10 +53,7 @@ func validateManifest(m Manifest) error {
 	if m.Gitignore.Local != ".standards/gitignore.local" {
 		return fmt.Errorf("gitignore.local path is reserved")
 	}
-	language := "go"
-	if c.Profile == "python-uv" {
-		language = "python"
-	}
+	language := profileLanguage(c.Profile)
 	if strings.Join(m.Gitignore.Templates, ",") != language+",linux,macos,windows" {
 		return fmt.Errorf("this profile requires the %s,linux,macos,windows gitignore.io snapshot", language)
 	}
@@ -70,14 +67,28 @@ func languageDecisionFor(s, profile string) error {
 			return fmt.Errorf("language decision needs a substantive %q section", heading)
 		}
 	}
-	language := "go"
-	if profile == "python-uv" {
-		language = "python"
+	language := profileLanguage(profile)
+	names := []string{language}
+	if profile == "node-npm" {
+		names = []string{"typescript", "javascript"}
 	}
-	if !strings.Contains(strings.ToLower(s), language) {
-		return fmt.Errorf("record the selected %s language", language)
+	for _, name := range names {
+		if strings.Contains(strings.ToLower(s), name) {
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("record the selected %s language", strings.Join(names, " or "))
+}
+
+// profileLanguage is also the gitignore.io template name of the profile.
+func profileLanguage(profile string) string {
+	switch profile {
+	case "python-uv":
+		return "python"
+	case "node-npm":
+		return "node"
+	}
+	return "go"
 }
 func cleanLocalEditorFor(s, profile string) (string, error) {
 	var lines []string

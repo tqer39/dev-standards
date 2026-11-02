@@ -3,3 +3,4 @@
 .gitignore -text whitespace=-blank-at-eol
 templates/base/gitignore.txt -text whitespace=-blank-at-eol
 templates/base/gitignore-python.txt -text whitespace=-blank-at-eol
+templates/base/gitignore-node.txt -text whitespace=-blank-at-eol

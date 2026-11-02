@@ -2,7 +2,7 @@
 
 初回設定で対象、権限、予算を固定し、以後の通常のルール保守は人間の指示・承認を待たず進める。
 LLM の起動には保存済みの ChatGPT ログインを使い、OpenAI API キーを追加しない。
-利用先は、ルートに Go module が１つ、または指定ディレクトリに Python/uv パッケージが１つあるリポジトリである。
+利用先は、ルートに Go module が１つ、または指定ディレクトリに Python/uv か Node.js/npm のパッケージが１つあるリポジトリである。
 
 ## 実行の分担
 
@@ -50,6 +50,8 @@ dev-standards onboard --repo /path/to/project --decision decision.md --fleet /pa
 ```
 
 Python/uv では `--profile python-uv --component-path session-indexer` を追加する。
+Node.js/npm では `--profile node-npm` を追加する。AGENTS.md を rulesync で生成している場合は
+`--instructions rulesync` も追加し、適用後に `rulesync generate` で AGENTS.md を再生成する。
 既存の予約タスクは先に移行し、Python と uv は完全な版番号で固定する。
 
 `onboard` は初回適用、既存指示の保持、hooks と CI の配置、CLI キャッシュの準備、台帳への登録を行う。

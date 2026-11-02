@@ -39,11 +39,12 @@ func execute(args []string, out, errOut io.Writer) error {
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(errOut)
 	root := flags.String("repo", ".", "対象リポジトリのルート")
-	var output, profile, decision, planPath, componentPath string
+	var output, profile, decision, planPath, componentPath, instructions string
 	switch command {
 	case "adopt":
 		flags.StringVar(&componentPath, "component-path", "", "単一コンポーネントの相対ディレクトリ。既定は .")
-		flags.StringVar(&profile, "profile", "", "言語プロファイル: go, python-uv")
+		flags.StringVar(&profile, "profile", "", "言語プロファイル: go, python-uv, node-npm")
+		flags.StringVar(&instructions, "instructions", "", "AGENTS.md を生成する外部ツール: rulesync。省略すると dev-standards が管理")
 		flags.StringVar(&decision, "decision", "", "要件・候補・選定理由を記したリポジトリ相対の Markdown")
 		flags.StringVar(&output, "output", "", "計画の保存先。省略すると JSON を標準出力へ出力")
 	case "plan":
@@ -89,7 +90,7 @@ func execute(args []string, out, errOut io.Writer) error {
 	case "adopt", "plan":
 		req := engine.Request{Mode: "reapply"}
 		if command == "adopt" {
-			req = engine.Request{Mode: "adopt", Profile: profile, DecisionPath: decision, ComponentPath: componentPath}
+			req = engine.Request{Mode: "adopt", Profile: profile, DecisionPath: decision, ComponentPath: componentPath, Instructions: instructions}
 		}
 		p, err := tree.Plan(req)
 		if err != nil {

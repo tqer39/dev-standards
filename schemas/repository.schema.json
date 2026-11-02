@@ -84,6 +84,11 @@
           },
           "minItems": 0,
           "uniqueItems": true
+        },
+        "instructions": {
+          "enum": [
+            "rulesync"
+          ]
         }
       },
       "required": [

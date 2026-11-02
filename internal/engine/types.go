@@ -18,6 +18,8 @@ type Manifest struct {
 	Components []Component `json:"components"`
 	AI         struct {
 		Targets []string `json:"targets"`
+		// Instructions names an external generator that owns AGENTS.md.
+		Instructions string `json:"instructions,omitempty"`
 	} `json:"ai"`
 	Gitignore struct {
 		Templates []string `json:"templates"`
@@ -55,6 +57,7 @@ type Request struct {
 	Profile       string `json:"profile,omitempty"`
 	DecisionPath  string `json:"decisionPath,omitempty"`
 	ComponentPath string `json:"componentPath,omitempty"`
+	Instructions  string `json:"instructions,omitempty"`
 }
 type Plan struct {
 	SchemaVersion int                 `json:"schemaVersion"`
@@ -82,6 +85,7 @@ type Lock struct {
 	GoVersion       string `json:"goVersion"`
 	PythonVersion   string `json:"pythonVersion,omitempty"`
 	UVVersion       string `json:"uvVersion,omitempty"`
+	NodeVersion     string `json:"nodeVersion,omitempty"`
 }
 type Result struct {
 	Rule      string `json:"rule"`

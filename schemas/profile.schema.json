@@ -17,7 +17,8 @@
       "enum": [
         "base",
         "go",
-        "python-uv"
+        "python-uv",
+        "node-npm"
       ]
     },
     "rules": {
@@ -53,6 +54,10 @@
           "pattern": "^[0-9]+[.][0-9]+[.][0-9]+$"
         },
         "uv": {
+          "type": "string",
+          "pattern": "^[0-9]+[.][0-9]+[.][0-9]+$"
+        },
+        "node": {
           "type": "string",
           "pattern": "^[0-9]+[.][0-9]+[.][0-9]+$"
         }

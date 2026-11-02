@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "id": "node-npm",
+  "rules": [],
+  "platforms": ["macos", "linux", "windows"],
+  "tools": {"node": "24.21.0"}
+}

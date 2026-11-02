@@ -7,8 +7,8 @@
 
 ## この版の実装範囲
 
-Go はリポジトリのルートに module が１つある構成、Python/uv はルートまたは
-指定ディレクトリにビルド可能なパッケージが１つある構成に対応します。
+Go はリポジトリのルートに module が１つある構成、Python/uv と Node.js/npm はルートまたは
+指定ディレクトリにパッケージが１つある構成に対応します。
 macOS、Linux、Windows で同じ CLI と mise タスクを使用します。
 
 - EditorConfig の配置と固有設定の保持
@@ -22,7 +22,8 @@ macOS、Linux、Windows で同じ CLI と mise タスクを使用します。
 更新 PR の自動検証・マージ、版の更新と利用先への移行にも対応します。
 初回設定と運用条件は [自律保守](docs/autonomous-maintenance.md) を参照してください。
 
-rulesync による他の LLM への配布、Renovate の共通設定、GitHub 管理設定の変更、
+AGENTS.md を rulesync で生成している利用先では、共通の入口を rulesync のルールとして配置できます。
+dev-standards 自身による rulesync を使った他の LLM への配布、Renovate の共通設定、GitHub 管理設定の変更、
 複数言語のモノレポは後続の実装です。
 
 ## 開発環境の準備
@@ -128,6 +129,25 @@ dev-standards verify
 既存の運用タスクと Git hooks は保持します。
 Python と uv の固定値はロックへ保存し、検証でロックファイルを暗黙に更新しません。
 macOS、Linux、Windows で同じタスクを生成しますが、固有タスクの OS 対応は別途必要です。
+
+## Node.js/npm の既存リポジトリへの適用
+
+`node-npm` は既存の `package.json` と `package-lock.json` を使います。
+共通タスクは npm scripts の `lint`、`format`、`format:check`、`test`、`build` を呼び出すため、
+Oxlint、Biome、ESLint などの実際のツールは利用先で選べます。
+５つの scripts をすべて定義し、`mise.toml` の `tools.node` を完全な `x.y.z` で固定してください。
+bootstrap は `npm ci --ignore-scripts` で依存のライフサイクルスクリプトを実行しません。
+npm workspaces と、コンポーネント以外の `package.json` には対応しません。
+言語選定記録には TypeScript または JavaScript を採用した理由を記します。
+
+```sh
+dev-standards adopt --profile node-npm --decision decision.md --output .standards/plans/adopt.json
+```
+
+AGENTS.md を rulesync で生成している場合は `--instructions rulesync` を追加します。
+dev-standards は AGENTS.md を書き換えず、共通の入口を `.rulesync/rules/dev-standards.md` に配置します。
+適用後に `rulesync generate` で AGENTS.md を再生成してください。
+`check` は、AGENTS.md に共通の入口が含まれていない場合に失敗します。
 
 ## 再適用
 

@@ -94,6 +94,9 @@ run = "dev-standards plan"
 run = "dev-standards verify"
 `, c.Path, c.Path, c.Path, c.Path, c.Path, c.Path, c.Path, c.Path, c.Path, c.Path, componentFile(c, "dist"))
 	}
+	if c.Profile == "node-npm" {
+		base = nodeTasks(c)
+	}
 	var extensions map[string]any
 	_, _ = toml.Decode(project, &extensions) // Plan validates the same source first.
 	for _, task := range []string{"bootstrap", "lint", "format", "format:check", "test", "build"} {
@@ -110,10 +113,28 @@ run = "dev-standards verify"
 	return base
 }
 
-func componentWorkflow(c Component) string {
-	if c.Profile != "python-uv" {
-		return projectWorkflow
+func componentWorkflow(m Manifest) string {
+	workflow := projectWorkflow
+	if m.AI.Instructions == "rulesync" {
+		workflow = strings.Replace(workflow, "'.standards/tasks.standards.toml', 'AGENTS.md',", "'.standards/tasks.standards.toml', '"+rulesyncEntryPath+"',", 1)
 	}
-	workflow := strings.Replace(projectWorkflow, "  workflow-result:", "  standards-check:", 1)
+	if m.Components[0].Profile == "go" {
+		return workflow
+	}
+	workflow = strings.Replace(workflow, "  workflow-result:", "  standards-check:", 1)
+	if m.Components[0].Profile == "node-npm" {
+		// npm scripts need node_modules, unlike uv run and go which fetch on demand.
+		workflow = strings.Replace(workflow, "      - run: mise run lint\n", "      - run: mise run bootstrap\n      - run: mise run lint\n", 1)
+	}
 	return strings.Replace(workflow, "      - run: gofmt -l . > /tmp/formatting && test ! -s /tmp/formatting", "      - run: mise run format:check", 1)
+}
+
+func componentInputs(c Component) []string {
+	switch c.Profile {
+	case "python-uv":
+		return []string{componentFile(c, "pyproject.toml"), componentFile(c, "uv.lock")}
+	case "node-npm":
+		return []string{componentFile(c, "package.json"), componentFile(c, "package-lock.json")}
+	}
+	return nil
 }

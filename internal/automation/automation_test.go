@@ -632,3 +632,55 @@ func TestCopySourceSkipsWorktreeGitFile(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestProjectInstructionOwnership(t *testing.T) {
+	for _, mode := range []string{"", "rulesync"} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			dir := t.TempDir()
+			runGit(t, dir, "init", "--quiet")
+			put(t, dir, "go.mod", "module example.com/project\n\ngo 1.27.3\n")
+			put(t, dir, "decision.md", "# 言語選定\n\n## 要件\n\n複数の OS で動作する CLI を開発する。\n\n## 候補\n\nGo と Python を配布方法から比較する。\n\n## 選定理由\n\nGo を採用し単体バイナリを配布する。\n")
+			tree, err := engine.Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tree.Close()
+			plan, err := tree.Plan(engine.Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md", Automation: true, Instructions: mode})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tree.Apply(plan); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := os.ReadFile(filepath.Join(dir, ".git/config"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"AGENTS.md", ".rulesync/rules/dev-standards.md"} {
+				put(t, dir, name, "candidate instruction\n")
+				want := (mode == "rulesync") == (name != "AGENTS.md")
+				if err := guardProject(dir, []string{name}, Default(Entry{}), cfg); (err == nil) != want {
+					t.Fatalf("%s allowed=%v: %v", name, want, err)
+				}
+			}
+			// Selecting rulesync alone must not grant ownership of an existing local rule.
+			state, err := os.ReadFile(filepath.Join(dir, ".standards/state.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var owned engine.State
+			if err := json.Unmarshal(state, &owned); err != nil {
+				t.Fatal(err)
+			}
+			name := "AGENTS.md"
+			if mode == "rulesync" {
+				name = ".rulesync/rules/dev-standards.md"
+			}
+			delete(owned.Files, name)
+			put(t, dir, ".standards/state.json", string(engine.JSON(owned)))
+			if err := guardProject(dir, []string{name}, Default(Entry{}), cfg); err == nil {
+				t.Fatal("unowned instructions accepted")
+			}
+		})
+	}
+}
