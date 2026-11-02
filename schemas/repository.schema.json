@@ -166,6 +166,10 @@
         "breachWindows": {
           "type": "integer",
           "minimum": 1
+        },
+        "nodePreflight": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)*\\.mjs$"
         }
       },
       "required": [

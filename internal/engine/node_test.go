@@ -65,7 +65,7 @@ func TestNodeAdoptWithRulesyncInstructions(t *testing.T) {
 		}
 	}
 	workflow := read(t, tree.Root, ".github/workflows/dev-standards.yml")
-	if strings.Contains(workflow, "gofmt") || !strings.Contains(workflow, "mise run bootstrap\n      - run: mise run lint") || strings.Contains(workflow, "'AGENTS.md'") || !strings.Contains(workflow, "'"+rulesyncEntryPath+"'") {
+	if strings.Contains(workflow, "gofmt") || !strings.Contains(workflow, "npm ci --ignore-scripts --prefix .\n      - run: mise run lint") || strings.Contains(workflow, "'AGENTS.md'") || !strings.Contains(workflow, "'"+rulesyncEntryPath+"'") {
 		t.Fatalf("workflow does not follow the profile: %s", workflow)
 	}
 	attributes := read(t, tree.Root, ".gitattributes")
@@ -81,6 +81,59 @@ func TestNodeAdoptWithRulesyncInstructions(t *testing.T) {
 	conflict, err := tree.Plan(Request{Mode: "reapply"})
 	if err != nil || len(conflict.Conflicts) != 1 {
 		t.Fatalf("missing conflict: %+v %v", conflict, err)
+	}
+}
+
+func TestNodeCIPreflightPreservesChecksAndOwnership(t *testing.T) {
+	tree, req := nodeFixture(t)
+	plan, err := tree.Plan(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	write(t, tree.Root, "scripts/security.mjs", "process.exit(0);\n")
+	manifest := read(t, tree.Root, ".standards/repository.yml")
+	write(t, tree.Root, ".standards/repository.yml", strings.Replace(manifest, `"prBudgetSeconds":`, `"nodePreflight": "scripts/security.mjs", "prBudgetSeconds":`, 1))
+	plan, err = tree.Plan(Request{Mode: "reapply"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	workflow := read(t, tree.Root, ".github/workflows/dev-standards.yml")
+	for _, required := range []string{"runs-on: ubuntu-24.04", "persist-credentials: false", "npm ci --ignore-scripts --prefix .", "mise run lint", "mise run format:check", "mise run test", "mise run build"} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("missing %s", required)
+		}
+	}
+	if strings.Index(workflow, "run: node scripts/security.mjs") > strings.Index(workflow, "uses: jdx/mise-action") {
+		t.Fatal("preflight executes after dependency setup")
+	}
+	commit(t, tree.Root)
+	again, err := tree.Plan(Request{Mode: "reapply"})
+	if err != nil || len(again.Changes) != 0 {
+		t.Fatalf("reapply: %+v %v", again, err)
+	}
+	write(t, tree.Root, ".github/workflows/dev-standards.yml", workflow+"# human edit\n")
+	conflict, err := tree.Plan(Request{Mode: "reapply"})
+	if err != nil || len(conflict.Conflicts) != 1 {
+		t.Fatalf("conflict: %+v %v", conflict, err)
+	}
+	if err := tree.Apply(conflict); err == nil {
+		t.Fatal("applied conflicting workflow")
+	}
+	if got := read(t, tree.Root, ".github/workflows/dev-standards.yml"); got != workflow+"# human edit\n" {
+		t.Fatal("human edit lost")
+	}
+	for _, invalid := range []string{"missing.mjs", "../outside.mjs", "scripts/security.mjs;echo bad", "scripts/security.mjs\nrun: bad"} {
+		changed := strings.Replace(manifest, `"prBudgetSeconds":`, `"nodePreflight": `+string(JSON(invalid))+`, "prBudgetSeconds":`, 1)
+		write(t, tree.Root, ".standards/repository.yml", changed)
+		if _, err := tree.Plan(Request{Mode: "reapply"}); err == nil {
+			t.Fatalf("accepted invalid preflight %q", invalid)
+		}
 	}
 }
 
@@ -183,5 +236,21 @@ func TestRulesyncOrdinaryAdoption(t *testing.T) {
 	}
 	if got := read(t, tree.Root, rulesyncEntryPath); got != "user edit\n" {
 		t.Fatal("failed apply changed source")
+	}
+}
+
+func TestNodeWorkflowRetainsBootstrapExtensions(t *testing.T) {
+	tree, req := nodeFixture(t)
+	write(t, tree.Root, ".standards/tasks.project.toml", "[\"project:bootstrap\"]\nrun = \"echo prepare additional tools\"\n")
+	plan, err := tree.Plan(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	workflow := read(t, tree.Root, ".github/workflows/dev-standards.yml")
+	if !strings.Contains(workflow, "npm ci --ignore-scripts --prefix .\n      - run: mise run project:bootstrap\n      - run: mise run lint") {
+		t.Fatal("bootstrap extension missing from CI")
 	}
 }

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "mise-project",
+  "rules": [],
+  "platforms": [
+    "macos",
+    "linux",
+    "windows"
+  ],
+  "tools": {}
+}

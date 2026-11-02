@@ -75,7 +75,11 @@ func (t *Tree) automationFiles(p *Plan, desired map[string]Snapshot, m Manifest)
 			}
 			desired[".standards/agents.local.md"] = local
 		}
-		desired["AGENTS.md"] = file(strings.TrimRight(normalized(local.Content), "\n") + "\n\n" + instructionsEntry(m))
+		entry := instructionsEntry(m)
+		if strings.TrimSpace(local.Content) != "" {
+			entry = strings.Replace(entry, "# 共通開発ルール", "## 共通開発ルール", 1)
+		}
+		desired["AGENTS.md"] = file(strings.TrimRight(normalized(local.Content), "\n") + "\n\n" + entry)
 	}
 	desired[".standards/rules.md"] = file("# 共通ルール\n\nEditorConfig、gitignore.io の採用入力、mise の作業入口を維持する。\n要件・言語選定記録を参照し、変更に対応した静的解析、整形、テストを実行する。\n生成物は直接編集せず `.standards` の正本を編集して再適用する。\n実行していない検査を成功と報告しない。\n更新は検証済みの版を採用し、作業中の入力と無関係な変更を保持する。\nルールの重複・矛盾・古い判断は根拠とともに保守へ記録する。\n")
 	if len(m.AI.Targets) == 0 {
@@ -127,7 +131,7 @@ func (t *Tree) automationFiles(p *Plan, desired map[string]Snapshot, m Manifest)
 			return fmt.Errorf("existing dev-standards workflow needs ownership resolution")
 		}
 	}
-	desired[".github/workflows/dev-standards.yml"] = file(componentWorkflow(m))
+	desired[".github/workflows/dev-standards.yml"] = file(componentWorkflow(m, p.Inputs[".standards/tasks.project.toml"].Content))
 	return nil
 }
 func (t *Tree) appendRuleGuidance(desired map[string]Snapshot) error {
@@ -137,7 +141,19 @@ func (t *Tree) appendRuleGuidance(desired map[string]Snapshot) error {
 	}
 	text := desired[".standards/rules.md"].Content
 	for _, r := range rules {
-		text += "\n## " + r.ID + "\n\n" + bundle.Read(r.Guidance)
+		guidance := bundle.Read(r.Guidance)
+		var lines []string
+		fenced := false
+		for _, line := range strings.Split(guidance, "\n") {
+			if strings.HasPrefix(line, "```") {
+				fenced = !fenced
+			}
+			if !fenced && strings.HasPrefix(line, "#") {
+				line = "##" + line
+			}
+			lines = append(lines, line)
+		}
+		text += "\n## " + r.ID + "\n\n" + strings.Join(lines, "\n")
 	}
 	desired[".standards/rules.md"] = file(text)
 	return nil
@@ -172,7 +188,7 @@ permissions:
   contents: read
 jobs:
   workflow-result:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

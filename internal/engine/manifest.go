@@ -44,8 +44,8 @@ func validateManifest(m Manifest) error {
 	if _, err := bundle.ResolveProfile(c.Profile); err != nil {
 		return err
 	}
-	if c.Profile == "go" && c.Path != "." {
-		return fmt.Errorf("Go component must be at the repository root")
+	if (c.Profile == "go" || c.Profile == "mise-project") && c.Path != "." {
+		return fmt.Errorf("Go and mise-project components must be at the repository root")
 	}
 	if c.Path != "." && (!regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]*(/[a-zA-Z0-9_][a-zA-Z0-9_-]*)*$`).MatchString(c.Path)) {
 		return fmt.Errorf("component path must be a literal relative directory")
@@ -80,7 +80,9 @@ func languageDecisionFor(s, profile string) error {
 	}
 	language := profileLanguage(profile)
 	names := []string{language}
-	if profile == "node-npm" {
+	if profile == "mise-project" {
+		names = []string{"typescript", "javascript", "python", "go", "swift", "rust"}
+	} else if profile == "node-npm" {
 		names = []string{"typescript", "javascript"}
 	}
 	for _, name := range names {
@@ -96,7 +98,7 @@ func profileLanguage(profile string) string {
 	switch profile {
 	case "python-uv":
 		return "python"
-	case "node-npm":
+	case "node-npm", "mise-project":
 		return "node"
 	}
 	return "go"
@@ -151,7 +153,11 @@ func cleanLocalEditorFor(s, profile string) (string, error) {
 	if profile == "go" && goIndent != "tab" {
 		return "", fmt.Errorf("local EditorConfig overrides Go tab indentation")
 	}
-	return strings.TrimSpace(strings.Join(lines, "\n")) + "\n", nil
+	cleaned := strings.TrimSpace(strings.Join(lines, "\n"))
+	if cleaned == "" {
+		return "", nil
+	}
+	return cleaned + "\n", nil
 }
 func validateInputPath(p string) error {
 	if err := validPath(p); err != nil {

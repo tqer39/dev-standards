@@ -33,9 +33,10 @@ type Manifest struct {
 		Rollout    string `json:"rollout"`
 	} `json:"update"`
 	CI struct {
-		PRBudgetSeconds int `json:"prBudgetSeconds"`
-		MinimumSamples  int `json:"minimumSamples"`
-		BreachWindows   int `json:"breachWindows"`
+		NodePreflight   string `json:"nodePreflight,omitempty"`
+		PRBudgetSeconds int    `json:"prBudgetSeconds"`
+		MinimumSamples  int    `json:"minimumSamples"`
+		BreachWindows   int    `json:"breachWindows"`
 	} `json:"ci"`
 }
 type Component struct {
@@ -88,16 +89,17 @@ type State struct {
 	Files         map[string]Snapshot `json:"files"`
 }
 type Lock struct {
-	SchemaVersion   int    `json:"schemaVersion"`
-	Repository      string `json:"repository"`
-	Version         string `json:"version"`
-	Bundle          string `json:"bundleSha256"`
-	GitignoreSHA256 string `json:"gitignoreSha256"`
-	GitignoreURL    string `json:"gitignoreUrl"`
-	GoVersion       string `json:"goVersion"`
-	PythonVersion   string `json:"pythonVersion,omitempty"`
-	UVVersion       string `json:"uvVersion,omitempty"`
-	NodeVersion     string `json:"nodeVersion,omitempty"`
+	ProjectToolsSHA256 string `json:"projectToolsSha256,omitempty"`
+	SchemaVersion      int    `json:"schemaVersion"`
+	Repository         string `json:"repository"`
+	Version            string `json:"version"`
+	Bundle             string `json:"bundleSha256"`
+	GitignoreSHA256    string `json:"gitignoreSha256"`
+	GitignoreURL       string `json:"gitignoreUrl"`
+	GoVersion          string `json:"goVersion"`
+	PythonVersion      string `json:"pythonVersion,omitempty"`
+	UVVersion          string `json:"uvVersion,omitempty"`
+	NodeVersion        string `json:"nodeVersion,omitempty"`
 }
 type Result struct {
 	Rule      string `json:"rule"`

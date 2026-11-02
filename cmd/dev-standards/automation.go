@@ -21,7 +21,7 @@ func automationCommand(command string, args []string, out, errOut io.Writer) err
 	flags.SetOutput(errOut)
 	repo := flags.String("repo", ".", "対象リポジトリ")
 	fleet := flags.String("fleet", "", "初回設定で固定する保守台帳 JSON")
-	profile := flags.String("profile", "go", "言語プロファイル: go, python-uv, node-npm")
+	profile := flags.String("profile", "go", "言語プロファイル: go, python-uv, node-npm, mise-project")
 	instructions := flags.String("instructions", "", "AGENTS.md を生成する外部ツール: rulesync。省略すると dev-standards が管理")
 	instructionLanguage := flags.String("instruction-language", "", "共通指示の言語: en（既定は日本語）")
 	companionsPath := flags.String("companions", "", "Go/Swift のパスと検証タスクを記した JSON")
