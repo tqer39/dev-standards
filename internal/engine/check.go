@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"go/format"
 	"io"
@@ -155,6 +156,18 @@ func (t *Tree) Inspect() (Inspection, error) {
 		}
 		if d.IsDir() && p != "." && (strings.HasPrefix(d.Name(), ".") || d.Name() == "node_modules" || d.Name() == "vendor") {
 			return fs.SkipDir
+		}
+		if d.IsDir() && p != "." {
+			marker, err := fs.Stat(t.fs.FS(), p+"/pyvenv.cfg")
+			if err == nil && !marker.IsDir() {
+				return fs.SkipDir
+			}
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".py") && !contains(r.Languages, "python") {
+			r.Languages = append(r.Languages, "python")
 		}
 		if !d.IsDir() && d.Name() == "pyproject.toml" && p != "pyproject.toml" {
 			if _, err := t.Read(p); err != nil {

@@ -71,6 +71,30 @@ func commit(t *testing.T, root string) {
 	}
 }
 
+func TestInspectFindsPythonWithoutManifest(t *testing.T) {
+	tree := fixture(t)
+	write(t, tree.Root, ".venv/lib/ignored.py", "")
+	write(t, tree.Root, "venv/pyvenv.cfg", "home = /python\n")
+	write(t, tree.Root, "venv/lib/site-packages/dependency.py", "")
+	write(t, tree.Root, "tools/custom-env/pyvenv.cfg", "home = /python\n")
+	write(t, tree.Root, "tools/custom-env/pyproject.toml", "[project]\nname = 'dependency'\n")
+	inspection, err := tree.Inspect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(inspection.Languages, "python") {
+		t.Fatal("Python in a virtual environment must not identify the project")
+	}
+	write(t, tree.Root, "catalog/main.py", "print('hello')\n")
+	inspection, err = tree.Inspect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(inspection.Languages, "python") {
+		t.Fatal("Python source without pyproject.toml must be detected")
+	}
+}
+
 func TestAdoptReapplyOffline(t *testing.T) {
 	tree := fixture(t)
 	p, e := tree.Plan(Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md"})
