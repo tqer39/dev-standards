@@ -24,6 +24,7 @@ func validateCompanions(m Manifest) error {
 		return fmt.Errorf("companion packages require a node-npm primary component")
 	}
 	seen := map[string]bool{}
+	seenTasks := map[string]bool{}
 	for _, c := range m.Companions {
 		if c.Profile != "go" && c.Profile != "swift" {
 			return fmt.Errorf("unsupported companion profile: %s", c.Profile)
@@ -38,6 +39,10 @@ func validateCompanions(m Manifest) error {
 		if !regexp.MustCompile(`^project:verify:[a-z][a-z0-9-]*$`).MatchString(c.VerifyTask) {
 			return fmt.Errorf("invalid companion verification task")
 		}
+		if seenTasks[c.VerifyTask] {
+			return fmt.Errorf("duplicate companion verification task: %s", c.VerifyTask)
+		}
+		seenTasks[c.VerifyTask] = true
 		if c.Profile == "swift" && strings.Join(m.Platforms, ",") != "macos" {
 			return fmt.Errorf("Swift companion verification currently requires platforms: [macos]")
 		}

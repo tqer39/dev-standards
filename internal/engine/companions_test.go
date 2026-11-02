@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -72,7 +73,7 @@ func TestCompanionAdoptionRollbackReapplyAndConflict(t *testing.T) {
 }
 
 func TestCompanionRejectsIncompleteOrUnsafeDeclarations(t *testing.T) {
-	for _, variant := range []string{"undeclared", "missing-manifest", "duplicate", "traversal", "template", "unknown-profile", "missing-task", "skipped-task", "cached-task", "dependency-cycle", "empty-run", "floating-go", "ignored-marker", "stale-plan", "symlink"} {
+	for _, variant := range []string{"undeclared", "missing-manifest", "duplicate", "duplicate-verify-task", "traversal", "template", "unknown-profile", "missing-task", "skipped-task", "cached-task", "dependency-cycle", "empty-run", "floating-go", "ignored-marker", "stale-plan", "symlink"} {
 		t.Run(variant, func(t *testing.T) {
 			tree, req := companionFixture(t)
 			switch variant {
@@ -82,6 +83,8 @@ func TestCompanionRejectsIncompleteOrUnsafeDeclarations(t *testing.T) {
 				os.Remove(filepath.Join(tree.Root, "harness/go.mod"))
 			case "duplicate":
 				write(t, tree.Root, "companions.json", `[{"path":"harness","profile":"go","verifyTask":"project:verify:a"},{"path":"harness","profile":"go","verifyTask":"project:verify:b"}]`)
+			case "duplicate-verify-task":
+				write(t, tree.Root, "companions.json", strings.ReplaceAll(read(t, tree.Root, "companions.json"), "project:verify:apple", "project:verify:harness"))
 			case "traversal":
 				write(t, tree.Root, "companions.json", `[{"path":"../harness","profile":"go","verifyTask":"project:verify:a"}]`)
 			case "template":
@@ -123,8 +126,30 @@ func TestCompanionRejectsIncompleteOrUnsafeDeclarations(t *testing.T) {
 			}
 			if _, err := tree.Plan(req); err == nil {
 				t.Fatal("accepted unsafe companion configuration")
+			} else if variant == "duplicate-verify-task" && !strings.Contains(err.Error(), "duplicate companion verification task") {
+				t.Fatalf("unexpected rejection: %v", err)
 			}
 		})
+	}
+}
+
+func TestCompanionReapplyRejectsDuplicateVerificationTask(t *testing.T) {
+	tree, req := companionFixture(t)
+	plan, err := tree.Plan(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal([]byte(read(t, tree.Root, ".standards/repository.yml")), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Companions[1].VerifyTask = manifest.Companions[0].VerifyTask
+	write(t, tree.Root, ".standards/repository.yml", string(JSON(manifest)))
+	if _, err := tree.Plan(Request{Mode: "reapply"}); err == nil || !strings.Contains(err.Error(), "duplicate companion verification task") {
+		t.Fatalf("expected duplicate verification task rejection: %v", err)
 	}
 }
 
