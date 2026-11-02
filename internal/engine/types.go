@@ -50,9 +50,11 @@ type Change struct {
 	After  Snapshot `json:"after"`
 }
 type Request struct {
-	Mode         string `json:"mode"`
-	Profile      string `json:"profile,omitempty"`
-	DecisionPath string `json:"decisionPath,omitempty"`
+	Mode          string `json:"mode"`
+	Automation    bool   `json:"automation,omitempty"`
+	Profile       string `json:"profile,omitempty"`
+	DecisionPath  string `json:"decisionPath,omitempty"`
+	ComponentPath string `json:"componentPath,omitempty"`
 }
 type Plan struct {
 	SchemaVersion int                 `json:"schemaVersion"`
@@ -78,6 +80,8 @@ type Lock struct {
 	GitignoreSHA256 string `json:"gitignoreSha256"`
 	GitignoreURL    string `json:"gitignoreUrl"`
 	GoVersion       string `json:"goVersion"`
+	PythonVersion   string `json:"pythonVersion,omitempty"`
+	UVVersion       string `json:"uvVersion,omitempty"`
 }
 type Result struct {
 	Rule      string `json:"rule"`

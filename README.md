@@ -7,7 +7,8 @@
 
 ## この版の実装範囲
 
-初期版は、リポジトリのルートに Go module が１つある構成に対応します。
+Go はリポジトリのルートに module が１つある構成、Python/uv はルートまたは
+指定ディレクトリにビルド可能なパッケージが１つある構成に対応します。
 macOS、Linux、Windows で同じ CLI と mise タスクを使用します。
 
 - EditorConfig の配置と固有設定の保持
@@ -17,8 +18,12 @@ macOS、Linux、Windows で同じ CLI と mise タスクを使用します。
 - 変更計画、ロック、適用済み状態、衝突検出、通常の書き込み失敗時の復元
 - YAML と JSON Schema によるルール・宣言・プロファイル・例外の検証
 
-rulesync、Renovate の配布、GitHub 設定の変更、定期更新、新版への移行、
-複数言語のモノレポは後続の実装です。この版で対応済みとは判定しません。
+既存の Codex ログインを使う自律保守、固定 hooks、通常開発の検証記録、
+更新 PR の自動検証・マージ、版の更新と利用先への移行にも対応します。
+初回設定と運用条件は [自律保守](docs/autonomous-maintenance.md) を参照してください。
+
+rulesync による他の LLM への配布、Renovate の共通設定、GitHub 管理設定の変更、
+複数言語のモノレポは後続の実装です。
 
 ## 開発環境の準備
 
@@ -33,6 +38,7 @@ mise run check
 
 `mise run check` は、Go の静的解析、Markdown lint、整形確認、テスト、
 CLI のビルドを実行します。テストには実際の CLI と mise を使う受け入れテストも含まれます。
+Windows では保守検証のビルドを繰り返すため、通常テストの上限は20分、CI ジョブの上限は30分です。
 
 ```sh
 mise run test:race
@@ -44,6 +50,11 @@ mise run catalog:check
 Windows の実行ファイル名は `dev-standards.exe`、他の OS では `dev-standards` です。
 利用先では、この実行ファイルが PATH から見つかる状態にしてください。
 `go install ./cmd/dev-standards` で Go のインストール先へ配置する方法も使えます。
+
+## 自律保守を含む初回導入
+
+初回以降の保守を自動化する場合は、[ホスト設定と onboard](docs/autonomous-maintenance.md) を使用します。
+以下の `adopt` は、保守台帳への登録を伴わない基本の適用操作です。
 
 ## 初回適用
 
@@ -93,6 +104,31 @@ dev-standards verify
 言語選定の妥当性のレビューと、新規環境での bootstrap は別の証拠が必要なため、
 結果をそれぞれ `review_required`、`not_run` として明示します。
 
+## Python/uv の既存リポジトリへの適用
+
+`python-uv` は既存の `pyproject.toml` と `uv.lock` を使い、pytest、Ruff、uv build を実行します。
+uv workspace と複数パッケージには対応しません。既存の Python コードを Go に移す必要はありません。
+`mise.toml` の `tools.python` と `tools.uv` は、現在使っている版を完全な `x.y.z` で固定してください。
+pytest と Ruff は利用先の開発依存に含めます。言語選定記録には Python を採用した理由を記します。
+
+```sh
+dev-standards adopt --profile python-uv --component-path session-indexer --decision decision.md --output .standards/plans/adopt.json
+dev-standards apply --plan .standards/plans/adopt.json
+mise trust
+mise run bootstrap
+dev-standards verify
+```
+
+ルートのパッケージでは `--component-path` を省略できます。
+自律保守の初回導入も `onboard --profile python-uv --component-path session-indexer` で指定します。
+予約済みの `lint`、`test` などは計画を作る前に明示的に移行します。
+共通の検査を追加の固有検査で補う場合は `.standards/tasks.project.toml` に
+`project:lint`、`project:test`、`project:build` などを定義してください。
+対応する共通タスクの依存として実行し、共通検査は維持します。
+既存の運用タスクと Git hooks は保持します。
+Python と uv の固定値はロックへ保存し、検証でロックファイルを暗黙に更新しません。
+macOS、Linux、Windows で同じタスクを生成しますが、固有タスクの OS 対応は別途必要です。
+
 ## 再適用
 
 ```sh
@@ -129,7 +165,7 @@ dev-standards check
 先に固有タスクへ移行してから、計画を作成してください。
 既存の `tools.go` は完全な `x.y.z` の固定値が必要です。
 
-初期版の共通ルールは例外で免除できません。空でない例外宣言は拒否します。
+共通の基本ルールは例外で免除できません。空でない例外宣言は拒否します。
 構造を定める例外スキーマは同梱していますが、期限付き免除の運用は後続の実装です。
 
 ## ルールと正本

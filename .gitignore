@@ -103,3 +103,6 @@ $RECYCLE.BIN/
 /bin/
 /coverage.out
 /.dev-standards-apply.lock
+
+/.local/
+/.standards/cache/

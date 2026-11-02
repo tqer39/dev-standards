@@ -3,6 +3,8 @@ package engine
 import (
 	"fmt"
 	"path"
+	"regexp"
+	"strconv"
 	"strings"
 
 	bundle "github.com/tqer39/dev-standards"
@@ -32,21 +34,35 @@ func validateManifest(m Manifest) error {
 	if m.Standard.Repository != bundle.Repository || m.Standard.Version != bundle.Version {
 		return fmt.Errorf("this CLI only supports %s@%s", bundle.Repository, bundle.Version)
 	}
-	if len(m.Components) != 1 || m.Components[0].Path != "." || m.Components[0].Profile != "go" {
-		return fmt.Errorf("initial release supports one Go component at the repository root")
+	if len(m.Components) != 1 {
+		return fmt.Errorf("exactly one component is supported")
 	}
-	if len(m.AI.Targets) != 0 {
-		return fmt.Errorf("AI targets require the later rulesync integration; use an empty list")
+	c := m.Components[0]
+	if _, err := bundle.ResolveProfile(c.Profile); err != nil {
+		return err
+	}
+	if c.Profile == "go" && c.Path != "." {
+		return fmt.Errorf("Go component must be at the repository root")
+	}
+	if c.Path != "." && (!regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]*(/[a-zA-Z0-9_][a-zA-Z0-9_-]*)*$`).MatchString(c.Path)) {
+		return fmt.Errorf("component path must be a literal relative directory")
+	}
+	if len(m.AI.Targets) > 0 && (len(m.AI.Targets) != 1 || m.AI.Targets[0] != "codexcli") {
+		return fmt.Errorf("only the codexcli adapter is supported")
 	}
 	if m.Gitignore.Local != ".standards/gitignore.local" {
 		return fmt.Errorf("gitignore.local path is reserved")
 	}
-	if strings.Join(m.Gitignore.Templates, ",") != "go,linux,macos,windows" {
-		return fmt.Errorf("this bundle contains the go,linux,macos,windows gitignore.io snapshot")
+	language := "go"
+	if c.Profile == "python-uv" {
+		language = "python"
+	}
+	if strings.Join(m.Gitignore.Templates, ",") != language+",linux,macos,windows" {
+		return fmt.Errorf("this profile requires the %s,linux,macos,windows gitignore.io snapshot", language)
 	}
 	return nil
 }
-func languageDecision(s string) error {
+func languageDecisionFor(s, profile string) error {
 	s = normalized(s)
 	for _, heading := range []string{"## 要件", "## 候補", "## 選定理由"} {
 		_, tail, ok := strings.Cut(s, heading+"\n")
@@ -54,12 +70,16 @@ func languageDecision(s string) error {
 			return fmt.Errorf("language decision needs a substantive %q section", heading)
 		}
 	}
-	if !strings.Contains(strings.ToLower(s), "go") {
-		return fmt.Errorf("record the selected Go language")
+	language := "go"
+	if profile == "python-uv" {
+		language = "python"
+	}
+	if !strings.Contains(strings.ToLower(s), language) {
+		return fmt.Errorf("record the selected %s language", language)
 	}
 	return nil
 }
-func cleanLocalEditor(s string) (string, error) {
+func cleanLocalEditorFor(s, profile string) (string, error) {
 	var lines []string
 	section := ""
 	goIndent := "tab"
@@ -106,7 +126,7 @@ func cleanLocalEditor(s string) (string, error) {
 		}
 		lines = append(lines, line)
 	}
-	if goIndent != "tab" {
+	if profile == "go" && goIndent != "tab" {
 		return "", fmt.Errorf("local EditorConfig overrides Go tab indentation")
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n")) + "\n", nil
@@ -119,4 +139,42 @@ func validateInputPath(p string) error {
 		return fmt.Errorf("language decision input must be a Markdown file")
 	}
 	return nil
+}
+
+func versionParts(s string) ([3]int, error) {
+	var parts [3]int
+	values := strings.Split(s, ".")
+	if len(values) != 3 {
+		return parts, fmt.Errorf("invalid version")
+	}
+	for i, v := range values {
+		if !pinnedGo(s) {
+			return parts, fmt.Errorf("invalid version")
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return parts, err
+		}
+		parts[i] = n
+	}
+	return parts, nil
+}
+func nonDowngrade(previous, current string) bool {
+	p, err := versionParts(previous)
+	if err != nil {
+		return false
+	}
+	c, err := versionParts(current)
+	if err != nil {
+		return false
+	}
+	for i := range p {
+		if p[i] < c[i] {
+			return true
+		}
+		if p[i] > c[i] {
+			return false
+		}
+	}
+	return true
 }

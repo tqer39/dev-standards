@@ -54,6 +54,10 @@ func (t *Tree) Verify(log io.Writer) (Report, error) {
 	if err != nil {
 		return r, err
 	}
+	fingerprint, err := t.Fingerprint()
+	if err != nil {
+		return r, err
+	}
 	r.Scope = "configuration-and-project-tasks"
 	for _, task := range []string{"lint", "format:check", "test", "build"} {
 		cmd := exec.Command("mise", "run", task)
@@ -71,6 +75,9 @@ func (t *Tree) Verify(log io.Writer) (Report, error) {
 			return r, fail(1, "project task failed: %s", task)
 		}
 		r.Results = append(r.Results, result)
+	}
+	if err := t.WriteReceipt(fingerprint); err != nil {
+		return r, err
 	}
 	return r, nil
 }
@@ -117,7 +124,7 @@ type Inspection struct {
 
 func (t *Tree) Inspect() (Inspection, error) {
 	r := Inspection{Root: t.Root, HEAD: t.head(), Files: []string{}, Languages: []string{}}
-	for _, p := range []string{".editorconfig", ".gitignore", "mise.toml", "go.mod", "package.json", "Cargo.toml", "Package.swift", "AGENTS.md", "rulesync.jsonc", "renovate.json", ".standards/repository.yml"} {
+	for _, p := range []string{".editorconfig", ".gitignore", "mise.toml", "pyproject.toml", "go.mod", "package.json", "Cargo.toml", "Package.swift", "AGENTS.md", "rulesync.jsonc", "renovate.json", ".standards/repository.yml"} {
 		s, err := t.Read(p)
 		if err != nil {
 			return r, err
@@ -127,6 +134,8 @@ func (t *Tree) Inspect() (Inspection, error) {
 		}
 		if s.Exists {
 			switch p {
+			case "pyproject.toml":
+				r.Languages = append(r.Languages, "python")
 			case "go.mod":
 				r.Languages = append(r.Languages, "go")
 			case "package.json":
@@ -139,6 +148,27 @@ func (t *Tree) Inspect() (Inspection, error) {
 				r.Adopted = true
 			}
 		}
+	}
+	err := fs.WalkDir(t.fs.FS(), ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && p != "." && (strings.HasPrefix(d.Name(), ".") || d.Name() == "node_modules" || d.Name() == "vendor") {
+			return fs.SkipDir
+		}
+		if !d.IsDir() && d.Name() == "pyproject.toml" && p != "pyproject.toml" {
+			if _, err := t.Read(p); err != nil {
+				return err
+			}
+			r.Files = append(r.Files, p)
+			if !contains(r.Languages, "python") {
+				r.Languages = append(r.Languages, "python")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return r, err
 	}
 	b, err := exec.Command("git", "-C", t.Root, "status", "--porcelain=v1").Output()
 	if err != nil {

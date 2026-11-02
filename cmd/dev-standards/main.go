@@ -24,7 +24,7 @@ func run(args []string, out, errOut io.Writer) int {
 }
 func execute(args []string, out, errOut io.Writer) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
-		fmt.Fprintln(out, "dev-standards inspect|adopt|plan|apply|check|verify|format-check|catalog|version\n\n対象は Git リポジトリのルート。各コマンドの --help で引数を確認できます。")
+		fmt.Fprintln(out, "dev-standards inspect|adopt|plan|apply|check|verify|audit|onboard|sync|host-init|maintain|prepare|finish|hook|feedback|session-verify|format-check|catalog|version\n\n対象は Git リポジトリのルート。各コマンドの --help で引数を確認できます。")
 		return nil
 	}
 	if args[0] == "version" || args[0] == "--version" {
@@ -32,13 +32,18 @@ func execute(args []string, out, errOut io.Writer) error {
 		return nil
 	}
 	command := args[0]
+	switch command {
+	case "audit", "onboard", "sync", "host-init", "maintain", "prepare", "finish", "hook", "feedback", "session-verify":
+		return automationCommand(command, args[1:], out, errOut)
+	}
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(errOut)
 	root := flags.String("repo", ".", "対象リポジトリのルート")
-	var output, profile, decision, planPath string
+	var output, profile, decision, planPath, componentPath string
 	switch command {
 	case "adopt":
-		flags.StringVar(&profile, "profile", "", "言語プロファイル。初期版は go")
+		flags.StringVar(&componentPath, "component-path", "", "単一コンポーネントの相対ディレクトリ。既定は .")
+		flags.StringVar(&profile, "profile", "", "言語プロファイル: go, python-uv")
 		flags.StringVar(&decision, "decision", "", "要件・候補・選定理由を記したリポジトリ相対の Markdown")
 		flags.StringVar(&output, "output", "", "計画の保存先。省略すると JSON を標準出力へ出力")
 	case "plan":
@@ -63,6 +68,11 @@ func execute(args []string, out, errOut io.Writer) error {
 		_, err = out.Write(engine.JSON(rules))
 		return err
 	}
+	if command == "check" || command == "verify" || command == "plan" {
+		if handled, err := forwardRuntime(*root, command, args[1:], out, errOut); handled || err != nil {
+			return err
+		}
+	}
 	tree, err := engine.Open(*root)
 	if err != nil {
 		return err
@@ -79,7 +89,7 @@ func execute(args []string, out, errOut io.Writer) error {
 	case "adopt", "plan":
 		req := engine.Request{Mode: "reapply"}
 		if command == "adopt" {
-			req = engine.Request{Mode: "adopt", Profile: profile, DecisionPath: decision}
+			req = engine.Request{Mode: "adopt", Profile: profile, DecisionPath: decision, ComponentPath: componentPath}
 		}
 		p, err := tree.Plan(req)
 		if err != nil {
