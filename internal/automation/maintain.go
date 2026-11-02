@@ -16,6 +16,7 @@ import (
 	"time"
 
 	bundle "github.com/tqer39/dev-standards"
+	"github.com/tqer39/dev-standards/internal/engine"
 )
 
 type Outcome struct {
@@ -383,7 +384,32 @@ func guardProject(dir string, paths []string, c Config, cfg []byte) error {
 	}
 	for _, p := range paths {
 		allowed := strings.HasPrefix(p, ".standards/") && !strings.HasPrefix(p, ".standards/cache/")
-		for _, name := range []string{"AGENTS.md", ".rulesync/rules/dev-standards.md", ".codex/hooks.json", ".editorconfig", ".gitignore", ".gitattributes", "mise.toml", ".github/workflows/dev-standards.yml"} {
+		if p == "AGENTS.md" || p == ".rulesync/rules/dev-standards.md" {
+			tree, err := engine.Open(dir)
+			if err != nil {
+				return err
+			}
+			manifest, err := tree.Read(".standards/repository.yml")
+			state, stateErr := tree.Read(".standards/state.json")
+			tree.Close()
+			if err != nil {
+				return err
+			}
+			if stateErr != nil {
+				return stateErr
+			}
+			var m engine.Manifest
+			var s engine.State
+			if err := bundle.Decode([]byte(manifest.Content), "repository", &m); err != nil {
+				return err
+			}
+			if err := json.Unmarshal([]byte(state.Content), &s); err != nil {
+				return err
+			}
+			owned := s.Files[p].Exists
+			allowed = owned && ((p == "AGENTS.md" && m.AI.Instructions != "rulesync") || (p == ".rulesync/rules/dev-standards.md" && m.AI.Instructions == "rulesync"))
+		}
+		for _, name := range []string{".codex/hooks.json", ".editorconfig", ".gitignore", ".gitattributes", "mise.toml", ".github/workflows/dev-standards.yml"} {
 			allowed = allowed || p == name
 		}
 		if !allowed {

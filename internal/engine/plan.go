@@ -80,7 +80,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 			return nil, fmt.Errorf("repository.yml: %w", err)
 		}
 	}
-	previousAutomation := len(m.AI.Targets) > 0
+	previousDeliveryPaths := automationPathsFor(m)
 	if upgrading {
 		if !nonDowngrade(m.Standard.Version, bundle.Version) {
 			return nil, fmt.Errorf("automatic downgrades are forbidden")
@@ -97,7 +97,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		m.Update.Rollout = "standard"
 	}
 	managedPaths := append([]string{}, managedPaths...)
-	if len(m.AI.Targets) > 0 {
+	if len(automationPathsFor(m)) > 0 {
 		managedPaths = append(managedPaths, automationPathsFor(m)...)
 	}
 	for _, name := range automationInputs {
@@ -276,21 +276,23 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		attrs.Content = strings.Replace(attrs.Content, "*.go text eol=lf\ngo.mod text eol=lf\ngo.sum text eol=lf", "*.js text eol=lf\n*.mjs text eol=lf\n*.cjs text eol=lf\n*.ts text eol=lf\n*.tsx text eol=lf\n"+componentFile(component, "package.json")+" text eol=lf\n"+componentFile(component, "package-lock.json")+" text eol=lf", 1)
 		desired[".gitattributes"] = attrs
 	}
-	if m.AI.Instructions == "rulesync" && len(m.AI.Targets) > 0 {
+	if m.AI.Instructions == "rulesync" {
 		attrs := desired[".gitattributes"]
 		attrs.Content += "/" + rulesyncEntryPath + " text eol=lf\n"
 		desired[".gitattributes"] = attrs
 	}
 	desired["mise.toml"] = file(rootMise)
 	desired[".standards/tasks.standards.toml"] = file(componentTasks(component, p.Inputs[".standards/tasks.project.toml"].Content))
-	if len(m.AI.Targets) > 0 {
+	if len(automationPathsFor(m)) > 0 {
 		if err := t.automationFiles(p, desired, m); err != nil {
 			return nil, err
 		}
+	}
+	if len(m.AI.Targets) > 0 {
 		desired[".standards/tasks.standards.toml"] = file(automatedTasksFor(componentTasks(component, p.Inputs[".standards/tasks.project.toml"].Content)))
 	}
 	required := append([]string{vendorPath}, componentInputs(component)...)
-	if len(m.AI.Targets) > 0 {
+	if len(automationPathsFor(m)) > 0 {
 		required = append(required, automationPathsFor(m)...)
 	}
 	if err := validateIgnore(desired[".gitignore"].Content, required...); err != nil {
@@ -312,9 +314,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 			return nil, fmt.Errorf("state has an unsupported version or ownership set")
 		}
 		requiredOwnership := append([]string{}, []string{".editorconfig", ".gitignore", ".gitattributes", "mise.toml", ".standards/tasks.standards.toml"}...)
-		if previousAutomation {
-			requiredOwnership = append(requiredOwnership, automationPathsFor(m)...)
-		}
+		requiredOwnership = append(requiredOwnership, previousDeliveryPaths...)
 		for _, name := range requiredOwnership {
 			if _, ok := state.Files[name]; !ok {
 				return nil, fmt.Errorf("state is missing required ownership: %s", name)

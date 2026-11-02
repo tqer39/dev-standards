@@ -33,12 +33,12 @@ func (t *Tree) Check() (Report, error) {
 	if len(p.Changes) > 0 || len(p.Conflicts) > 0 {
 		status = "fail"
 		evidence = fmt.Sprintf("%d pending changes; conflicts: %v", len(p.Changes), p.Conflicts)
-	} else if manifest.AI.Instructions == "rulesync" && len(manifest.AI.Targets) > 0 {
+	} else if manifest.AI.Instructions == "rulesync" {
 		agents, err := t.Read("AGENTS.md")
 		if err != nil {
 			return r, err
 		}
-		if !strings.Contains(normalized(agents.Content), strings.TrimSpace(agentsEntry)) {
+		if !strings.Contains(normalized(agents.Content), strings.TrimSpace(instructionsEntry(manifest))) {
 			status = "fail"
 			evidence = "AGENTS.md lacks the shared entry; run rulesync generate"
 		}

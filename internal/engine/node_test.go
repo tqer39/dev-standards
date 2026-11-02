@@ -141,3 +141,47 @@ func TestNodeWithoutRulesyncOwnsAgents(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRulesyncOrdinaryAdoption(t *testing.T) {
+	tree, req := nodeFixture(t)
+	req.Automation = false
+	plan, err := tree.Plan(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	entry := read(t, tree.Root, rulesyncEntryPath)
+	if !strings.Contains(entry, "mise run standards:verify") {
+		t.Fatal("ordinary adoption lacks working verification instructions")
+	}
+	for _, name := range []string{".codex/hooks.json", ".github/workflows/dev-standards.yml", ".standards/agents.local.md"} {
+		if _, err := os.Stat(filepath.Join(tree.Root, name)); !os.IsNotExist(err) {
+			t.Fatalf("unexpected automation output: %s", name)
+		}
+	}
+	if _, err := tree.Check(); err == nil {
+		t.Fatal("missing rulesync generation accepted")
+	}
+	write(t, tree.Root, "AGENTS.md", "# 固有ルール\n\n"+instructionsEntry(Manifest{}))
+	if _, err := tree.Check(); err != nil {
+		t.Fatal(err)
+	}
+	commit(t, tree.Root)
+	again, err := tree.Plan(Request{Mode: "reapply"})
+	if err != nil || len(again.Changes) != 0 || len(again.Conflicts) != 0 {
+		t.Fatalf("not idempotent: %+v %v", again, err)
+	}
+	write(t, tree.Root, rulesyncEntryPath, "user edit\n")
+	conflict, err := tree.Plan(Request{Mode: "reapply"})
+	if err != nil || len(conflict.Conflicts) == 0 {
+		t.Fatalf("missing ownership conflict: %+v %v", conflict, err)
+	}
+	if err := tree.Apply(conflict); err == nil {
+		t.Fatal("overwrote edited instruction source")
+	}
+	if got := read(t, tree.Root, rulesyncEntryPath); got != "user edit\n" {
+		t.Fatal("failed apply changed source")
+	}
+}
