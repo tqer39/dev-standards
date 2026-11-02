@@ -34,6 +34,11 @@ func validateMiseProject(cfg map[string]any) error {
 		if !ok {
 			return fmt.Errorf("mise-project requires explicit repo:%s task", name)
 		}
+		for _, key := range []string{"platforms", "sources", "outputs", "skip", "wait_for"} {
+			if _, exists := task[key]; exists {
+				return fmt.Errorf("repo:%s cannot skip required checks with %s", name, key)
+			}
+		}
 		run, hasRun := task["run"]
 		deps, hasDeps := task["depends"]
 		if (!hasRun || fmt.Sprint(run) == "" || fmt.Sprint(run) == "[]") && (!hasDeps || fmt.Sprint(deps) == "[]") {

@@ -91,6 +91,9 @@ func TestMiseProjectAdoptReplayAndFailure(t *testing.T) {
 
 func TestMiseProjectRejectsIncompleteTasksAndFloatingTools(t *testing.T) {
 	for _, mutation := range []func(string) string{
+		func(s string) string {
+			return strings.Replace(s, "[tasks.\"repo:test\"]", "[tasks.\"repo:test\"]\noutputs = [\"cached\"]", 1)
+		},
 		func(s string) string { return strings.Replace(s, "repo:build", "other:build", 1) },
 		func(s string) string { return strings.Replace(s, "1.27.3", "latest", 1) },
 		func(s string) string { return strings.Replace(s, "run = \"echo checked\"", "run = \"\"", 1) },
@@ -105,7 +108,7 @@ func TestMiseProjectRejectsIncompleteTasksAndFloatingTools(t *testing.T) {
 
 func TestProjectEnglishDecisionAndGeneratedHeadingHierarchy(t *testing.T) {
 	tree, req := projectFixture(t)
-	write(t, tree.Root, "decision.md", "# Languages\n\n## Requirements\n\nMaintain the browser and harness together.\n\n## Candidates\n\nTypeScript and Go with existing libraries.\n\n## Rationale\n\nKeep TypeScript for the browser and Go for the harness.\n")
+	write(t, tree.Root, "decision.md", "# Languages\n\n## Requirements\n\nMaintain the browser and harness together.\n\n## Candidates\n\nTypeScript and Go with existing libraries.\n\n## Selection rationale\n\nKeep TypeScript for the browser and Go for the harness.\n")
 	write(t, tree.Root, "AGENTS.md", "# Project instructions\n\nPreserve existing behavior.\n")
 	req.Automation = true
 	plan, err := tree.Plan(req)

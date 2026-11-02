@@ -68,13 +68,33 @@ func (t *Tree) Verify(log io.Writer) (Report, error) {
 	if err != nil {
 		return r, err
 	}
+	var manifest Manifest
+	snapshot, err := t.Read(".standards/repository.yml")
+	if err != nil {
+		return r, err
+	}
+	if err := bundle.Decode([]byte(snapshot.Content), "repository", &manifest); err != nil {
+		return r, err
+	}
+	if err := companionHostSupported(manifest); err != nil {
+		return r, err
+	}
 	r.Scope = "configuration-and-project-tasks"
-	for _, task := range []string{"lint", "format:check", "test", "build"} {
+	tasks := []string{"lint", "format:check", "test", "build"}
+	for _, c := range manifest.Companions {
+		tasks = append(tasks, c.VerifyTask)
+	}
+	for _, task := range tasks {
 		cmd := exec.Command("mise", "run", task)
 		cmd.Dir = t.Root
 		cmd.Stdout = log
 		cmd.Stderr = log
 		result := Result{"CORE-LINT", task, r.Results[0].Component, "pass", "mise run " + task}
+		for _, c := range manifest.Companions {
+			if task == c.VerifyTask {
+				result.Component = c.Path
+			}
+		}
 		if task == "format:check" {
 			result.Rule = "CORE-FORMAT"
 		}

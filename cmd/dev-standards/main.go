@@ -39,9 +39,11 @@ func execute(args []string, out, errOut io.Writer) error {
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(errOut)
 	root := flags.String("repo", ".", "対象リポジトリのルート")
-	var output, profile, decision, planPath, componentPath, instructions string
+	var output, profile, decision, planPath, componentPath, instructions, companionsPath, instructionLanguage string
 	switch command {
 	case "adopt":
+		flags.StringVar(&instructionLanguage, "instruction-language", "", "共通指示の言語: en（既定は日本語）")
+		flags.StringVar(&companionsPath, "companions", "", "Go/Swift のパスと検証タスクを記した JSON")
 		flags.StringVar(&componentPath, "component-path", "", "単一コンポーネントの相対ディレクトリ。既定は .")
 		flags.StringVar(&profile, "profile", "", "言語プロファイル: go, python-uv, node-npm, mise-project")
 		flags.StringVar(&instructions, "instructions", "", "AGENTS.md を生成する外部ツール: rulesync。省略すると dev-standards が管理")
@@ -90,7 +92,7 @@ func execute(args []string, out, errOut io.Writer) error {
 	case "adopt", "plan":
 		req := engine.Request{Mode: "reapply"}
 		if command == "adopt" {
-			req = engine.Request{Mode: "adopt", Profile: profile, DecisionPath: decision, ComponentPath: componentPath, Instructions: instructions}
+			req = engine.Request{Mode: "adopt", Profile: profile, DecisionPath: decision, ComponentPath: componentPath, Instructions: instructions, CompanionsPath: companionsPath, InstructionLanguage: instructionLanguage}
 		}
 		p, err := tree.Plan(req)
 		if err != nil {

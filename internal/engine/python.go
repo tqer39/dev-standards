@@ -125,6 +125,14 @@ func componentWorkflow(m Manifest, project string) string {
 	if m.CI.NodePreflight != "" {
 		workflow = strings.Replace(workflow, "      - uses: jdx/mise-action@", "      - run: node "+m.CI.NodePreflight+"\n      - uses: jdx/mise-action@", 1)
 	}
+	if len(m.Companions) > 0 {
+		workflow = strings.Replace(workflow, "      - run: mise run build\n", "      - run: mise run build\n      - run: mise run standards:companions\n", 1)
+		for _, c := range m.Companions {
+			if c.Profile == "swift" {
+				workflow = strings.Replace(workflow, "runs-on: ubuntu-24.04", "runs-on: macos-26", 1)
+			}
+		}
+	}
 	if m.AI.Instructions == "rulesync" {
 		workflow = strings.Replace(workflow, "'.standards/tasks.standards.toml', 'AGENTS.md',", "'.standards/tasks.standards.toml', '"+rulesyncEntryPath+"',", 1)
 	}

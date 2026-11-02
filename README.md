@@ -25,6 +25,7 @@ macOS、Linux、Windows で同じ CLI と mise タスクを使用します。
 AGENTS.md を rulesync で生成している利用先では、共通の入口を rulesync のルールとして配置できます。
 dev-standards 自身による rulesync を使った他の LLM への配布、Renovate の共通設定、GitHub 管理設定の変更、
 言語別の検証を自動構成する複数言語のモノレポ対応は後続の実装です。
+Node.js/npm を主コンポーネントとし、既存タスクで検証する Go/Swift パッケージを明示的に併設できます。
 
 ## 開発環境の準備
 
@@ -172,6 +173,35 @@ Node.js/npm の利用先で依存導入前に既存の安全性検査が必要�
 空でない既存の `.mjs` ファイルだけを指定でき、親ディレクトリやシェル式は拒否します。
 この検査は mise と依存の導入より前に実行し、必須の lint・整形確認・テスト・ビルドも維持します。
 正本を変更した後は `plan` と `apply` で CI を再生成してください。
+
+## Go/Swift パッケージを併設する Node.js/npm リポジトリ
+
+主コンポーネントには `node-npm` を使い、追加パッケージのパス、言語、既存の検証タスクを JSON で宣言します。
+未宣言の追加パッケージは引き続き拒否します。追加パッケージは Node.js の検査で検証済みとは扱いません。
+
+```json
+[
+  {"path": "harness", "profile": "go", "verifyTask": "project:verify:harness"},
+  {"path": "apple", "profile": "swift", "verifyTask": "project:verify:apple"}
+]
+```
+
+このファイルを `companions.json` とし、`.standards/tasks.project.toml` に対応するタスクを先に定義します。
+各タスクには実行する `run` コマンドが必要です。`platforms`、`sources`、`outputs` などによる省略、
+依存タスク経由の循環は許可しません。言語ごとの lint、整形、テスト、ビルドの具体的な範囲は利用先で定め、
+既存の検証スクリプトへ接続してください。Go/Swift の設定自体を共通プロファイルが生成する機能ではありません。
+Swift を併設する場合は検証対象 OS を macOS に限定し、生成 CI も macOS 上で実行します。
+Swift/Xcode はホスト側で準備してください。Go の版は既存の mise 設定で固定します。
+
+```sh
+dev-standards adopt --profile node-npm --companions companions.json --instruction-language en --decision decision.md --output .standards/plans/adopt.json
+```
+
+`onboard` にも同じ追加オプションを使えます。`--instruction-language en` は共通の AGENTS.md 入口を英語にします。
+言語選定記録は従来の日本語見出しに加え、`Requirements`、`Candidates`、`Selection rationale` も使用できます。
+宣言は `.standards/repository.yml` に保存します。再適用時に初回の JSON を再指定する必要はありません。
+`verify` は主コンポーネントの検査後に追加タスクを実行し、失敗時には成功の検証記録を作りません。
+`mise run check` と生成 CI も `standards:companions` を通じて追加タスクを実行します。
 
 ## 適用版の確認
 
