@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "CORE-MISE",
-  "revision": 2,
+  "revision": 3,
   "status": "active",
   "title": "タスクの入口を mise に集約する",
   "rationale": "共通の開発手順を固定した実行系と成果物から再現し、補助キャッシュの不一致と検査結果の不一致を区別する。",

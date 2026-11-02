@@ -124,16 +124,22 @@ func (t *Tree) FormatCheck() ([]string, error) {
 }
 
 type Inspection struct {
-	Root      string   `json:"root"`
-	HEAD      string   `json:"head"`
-	Files     []string `json:"configurationFiles"`
-	Languages []string `json:"languages"`
-	GitStatus string   `json:"gitStatus"`
-	Adopted   bool     `json:"adopted"`
+	Root      string           `json:"root"`
+	HEAD      string           `json:"head"`
+	Files     []string         `json:"configurationFiles"`
+	Languages []string         `json:"languages"`
+	GitStatus string           `json:"gitStatus"`
+	Adopted   bool             `json:"adopted"`
+	Standard  *AppliedStandard `json:"standard,omitempty"`
 }
 
 func (t *Tree) Inspect() (Inspection, error) {
 	r := Inspection{Root: t.Root, HEAD: t.head(), Files: []string{}, Languages: []string{}}
+	standard, err := t.AppliedStandard()
+	if err != nil {
+		return r, err
+	}
+	r.Standard = standard
 	for _, p := range []string{".editorconfig", ".gitignore", "mise.toml", "pyproject.toml", "go.mod", "package.json", "Cargo.toml", "Package.swift", "AGENTS.md", "rulesync.jsonc", "renovate.json", ".standards/repository.yml"} {
 		s, err := t.Read(p)
 		if err != nil {
@@ -159,7 +165,10 @@ func (t *Tree) Inspect() (Inspection, error) {
 			}
 		}
 	}
-	err := fs.WalkDir(t.fs.FS(), ".", func(p string, d fs.DirEntry, err error) error {
+	if r.Adopted && r.Standard == nil {
+		return r, fmt.Errorf("adopted repository is missing .standards/lock.json")
+	}
+	err = fs.WalkDir(t.fs.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

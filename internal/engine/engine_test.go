@@ -500,3 +500,87 @@ func TestCheckoutWithAutocrlfRemainsIdempotent(t *testing.T) {
 		t.Fatalf("checkout changed generation: changes=%v conflicts=%v", p.Changes, p.Conflicts)
 	}
 }
+
+func TestAppliedVersionTaskUsesLockWithoutCLI(t *testing.T) {
+	tree := fixture(t)
+	adopt(t, tree)
+	commit(t, tree.Root)
+	run := func(want bool) string {
+		t.Helper()
+		cmd := exec.Command("mise", "run", "standards:version")
+		cmd.Dir = tree.Root
+		cmd.Env = append(os.Environ(), "MISE_TRUSTED_CONFIG_PATHS="+tree.Root, "MISE_TASK_OUTPUT=interleave")
+		output, err := cmd.CombinedOutput()
+		if (err == nil) != want {
+			t.Fatalf("version task: %s: %v", output, err)
+		}
+		return string(output)
+	}
+	if output := run(true); !strings.Contains(output, "dev-standards 適用版: "+bundle.Version) {
+		t.Fatal(output)
+	}
+	again, err := tree.Plan(Request{Mode: "reapply"})
+	if err != nil || len(again.Changes) != 0 || len(again.Conflicts) != 0 {
+		t.Fatalf("non-idempotent: %+v %v", again, err)
+	}
+	generated := read(t, tree.Root, ".standards/tasks.standards.toml")
+	write(t, tree.Root, ".standards/tasks.standards.toml", generated+"\n# user edit\n")
+	conflict, err := tree.Plan(Request{Mode: "reapply"})
+	if err != nil || len(conflict.Conflicts) == 0 {
+		t.Fatalf("missing conflict: %+v %v", conflict, err)
+	}
+	if err := tree.Apply(conflict); err == nil {
+		t.Fatal("overwrote user's task changes")
+	}
+	if got := read(t, tree.Root, ".standards/tasks.standards.toml"); got != generated+"\n# user edit\n" {
+		t.Fatal("failed apply changed tasks")
+	}
+	write(t, tree.Root, ".standards/tasks.standards.toml", generated)
+	// The displayed version comes from the lock, never from an installed CLI.
+	var lock Lock
+	if err := strictJSON(read(t, tree.Root, ".standards/lock.json"), &lock); err != nil {
+		t.Fatal(err)
+	}
+	lock.Version = "0.1.0"
+	write(t, tree.Root, ".standards/lock.json", string(JSON(lock)))
+	if output := run(true); !strings.Contains(output, "適用版: 0.1.0") {
+		t.Fatal(output)
+	}
+	lock.Version = "1.2.3; echo unsafe"
+	write(t, tree.Root, ".standards/lock.json", string(JSON(lock)))
+	run(false)
+	if err := os.Remove(filepath.Join(tree.Root, ".standards/lock.json")); err != nil {
+		t.Fatal(err)
+	}
+	run(false)
+}
+
+func TestInspectAppliedStandardAcrossVersions(t *testing.T) {
+	tree := fixture(t)
+	inspection, err := tree.Inspect()
+	if err != nil || inspection.Standard != nil {
+		t.Fatalf("unadopted: %+v %v", inspection, err)
+	}
+	adopt(t, tree)
+	var lock Lock
+	if err := strictJSON(read(t, tree.Root, ".standards/lock.json"), &lock); err != nil {
+		t.Fatal(err)
+	}
+	lock.Version = "0.1.0"
+	lock.Bundle = strings.Repeat("a", 64)
+	write(t, tree.Root, ".standards/lock.json", string(JSON(lock)))
+	inspection, err = tree.Inspect()
+	if err != nil || inspection.Standard == nil || inspection.Standard.Version != "0.1.0" || inspection.Standard.Bundle != lock.Bundle {
+		t.Fatalf("locked version: %+v %v", inspection, err)
+	}
+	write(t, tree.Root, ".standards/lock.json", "{broken")
+	if _, err := tree.Inspect(); err == nil {
+		t.Fatal("corrupt lock accepted")
+	}
+	if err := os.Remove(filepath.Join(tree.Root, ".standards/lock.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tree.Inspect(); err == nil {
+		t.Fatal("missing lock in an adopted repository accepted")
+	}
+}
