@@ -17,6 +17,12 @@ const rulesyncEntryPath = ".rulesync/rules/dev-standards.md"
 const agentsEntry = "# 共通開発ルール\n\n作業開始時に `.standards/rules.md` を読み、`mise run standards:prepare` を実行する。\n作業終了前に `mise run standards:finish` を実行する。\n不足する設定は整備し、共通ルールの問題は `dev-standards feedback` で記録する。\n共通ルールの保守に人間の追加指示・承認を待たず、設定済みの自律保守に引き継ぐ。\n"
 
 func instructionsEntry(m Manifest) string {
+	if m.AI.Language == "en" {
+		if len(m.AI.Targets) > 0 {
+			return "## Shared development standards\n\nRead `.standards/rules.md` and run `mise run standards:prepare` before working.\nRun `mise run standards:verify` and `mise run standards:finish` before finishing.\nEdit canonical sources under `.standards`, then review and apply a generated plan.\nRecord evidence of shared-rule problems with `dev-standards feedback`.\nReport checks that were not run accurately.\n"
+		}
+		return "## Shared development standards\n\nRead `.standards/rules.md` and the language decision before working.\nEdit canonical sources and regenerate managed files.\nRun `mise run standards:verify` before finishing; do not claim unrun checks passed.\n"
+	}
 	if len(m.AI.Targets) > 0 {
 		return agentsEntry
 	}
@@ -170,6 +176,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d
         with:
           version: 2026.10.20

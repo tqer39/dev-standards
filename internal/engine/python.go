@@ -119,6 +119,14 @@ run = """{% set lock = read_json(path='.standards/lock.json') %}{% if lock.versi
 
 func componentWorkflow(m Manifest) string {
 	workflow := projectWorkflow
+	if len(m.Companions) > 0 {
+		workflow = strings.Replace(workflow, "      - run: mise run build\n", "      - run: mise run build\n      - run: mise run standards:companions\n", 1)
+		for _, c := range m.Companions {
+			if c.Profile == "swift" {
+				workflow = strings.Replace(workflow, "runs-on: ubuntu-latest", "runs-on: macos-26", 1)
+			}
+		}
+	}
 	if m.AI.Instructions == "rulesync" {
 		workflow = strings.Replace(workflow, "'.standards/tasks.standards.toml', 'AGENTS.md',", "'.standards/tasks.standards.toml', '"+rulesyncEntryPath+"',", 1)
 	}

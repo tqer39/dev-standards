@@ -50,7 +50,8 @@ dev-standards onboard --repo /path/to/project --decision decision.md --fleet /pa
 ```
 
 Python/uv では `--profile python-uv --component-path session-indexer` を追加する。
-Node.js/npm では `--profile node-npm` を追加する。AGENTS.md を rulesync で生成している場合は
+Node.js/npm では `--profile node-npm` を追加する。Go/Swift を併設する場合は README の宣言を作り、
+`--companions companions.json` を追加する。英語の共通指示には `--instruction-language en` を使う。AGENTS.md を rulesync で生成している場合は
 `--instructions rulesync` も追加し、適用後に `rulesync generate` で AGENTS.md を再生成する。
 既存の予約タスクは先に移行し、Python と uv は完全な版番号で固定する。
 
