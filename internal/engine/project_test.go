@@ -130,3 +130,17 @@ func TestProjectEnglishDecisionAndGeneratedHeadingHierarchy(t *testing.T) {
 		}
 	}
 }
+
+func TestEmptyEditorConfigHasNoTrailingBlankLine(t *testing.T) {
+	tree, req := projectFixture(t)
+	plan, err := tree.Plan(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	if strings.HasSuffix(read(t, tree.Root, ".editorconfig"), "\n\n") {
+		t.Fatal("generated trailing blank line")
+	}
+}

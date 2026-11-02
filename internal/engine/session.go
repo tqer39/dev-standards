@@ -72,7 +72,7 @@ func (t *Tree) fingerprint(depth int) (string, error) {
 				return "", err
 			}
 			resolved := path.Clean(path.Join(path.Dir(p), target))
-			if path.IsAbs(target) || !listed[resolved] {
+			if path.IsAbs(target) || !listed[resolved] || strings.HasPrefix(resolved, ".standards/cache/") || strings.HasPrefix(resolved, ".local/") {
 				return "", fmt.Errorf("symlink target must be a listed repository file: %s", p)
 			}
 			if err := t.safe(resolved); err != nil {

@@ -153,7 +153,11 @@ func cleanLocalEditorFor(s, profile string) (string, error) {
 	if profile == "go" && goIndent != "tab" {
 		return "", fmt.Errorf("local EditorConfig overrides Go tab indentation")
 	}
-	return strings.TrimSpace(strings.Join(lines, "\n")) + "\n", nil
+	cleaned := strings.TrimSpace(strings.Join(lines, "\n"))
+	if cleaned == "" {
+		return "", nil
+	}
+	return cleaned + "\n", nil
 }
 func validateInputPath(p string) error {
 	if err := validPath(p); err != nil {
