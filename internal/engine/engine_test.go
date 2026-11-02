@@ -577,4 +577,10 @@ func TestInspectAppliedStandardAcrossVersions(t *testing.T) {
 	if _, err := tree.Inspect(); err == nil {
 		t.Fatal("corrupt lock accepted")
 	}
+	if err := os.Remove(filepath.Join(tree.Root, ".standards/lock.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tree.Inspect(); err == nil {
+		t.Fatal("missing lock in an adopted repository accepted")
+	}
 }

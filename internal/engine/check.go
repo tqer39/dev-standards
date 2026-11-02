@@ -165,6 +165,9 @@ func (t *Tree) Inspect() (Inspection, error) {
 			}
 		}
 	}
+	if r.Adopted && r.Standard == nil {
+		return r, fmt.Errorf("adopted repository is missing .standards/lock.json")
+	}
 	err = fs.WalkDir(t.fs.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
