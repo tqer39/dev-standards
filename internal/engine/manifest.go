@@ -41,8 +41,8 @@ func validateManifest(m Manifest) error {
 	if _, err := bundle.ResolveProfile(c.Profile); err != nil {
 		return err
 	}
-	if c.Profile == "go" && c.Path != "." {
-		return fmt.Errorf("Go component must be at the repository root")
+	if (c.Profile == "go" || c.Profile == "mise-project") && c.Path != "." {
+		return fmt.Errorf("Go and mise-project components must be at the repository root")
 	}
 	if c.Path != "." && (!regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]*(/[a-zA-Z0-9_][a-zA-Z0-9_-]*)*$`).MatchString(c.Path)) {
 		return fmt.Errorf("component path must be a literal relative directory")
@@ -61,15 +61,23 @@ func validateManifest(m Manifest) error {
 }
 func languageDecisionFor(s, profile string) error {
 	s = normalized(s)
-	for _, heading := range []string{"## 要件", "## 候補", "## 選定理由"} {
-		_, tail, ok := strings.Cut(s, heading+"\n")
-		if !ok || len(strings.TrimSpace(strings.Split(tail, "\n## ")[0])) < 8 {
-			return fmt.Errorf("language decision needs a substantive %q section", heading)
+	for _, headings := range [][]string{{"## 要件", "## Requirements"}, {"## 候補", "## Candidates"}, {"## 選定理由", "## Rationale"}} {
+		valid := false
+		for _, heading := range headings {
+			_, tail, ok := strings.Cut(s, heading+"\n")
+			if ok && len(strings.TrimSpace(strings.Split(tail, "\n## ")[0])) >= 8 {
+				valid = true
+			}
+		}
+		if !valid {
+			return fmt.Errorf("language decision needs a substantive %q section", headings[0])
 		}
 	}
 	language := profileLanguage(profile)
 	names := []string{language}
-	if profile == "node-npm" {
+	if profile == "mise-project" {
+		names = []string{"typescript", "javascript", "python", "go", "swift", "rust"}
+	} else if profile == "node-npm" {
 		names = []string{"typescript", "javascript"}
 	}
 	for _, name := range names {
@@ -85,7 +93,7 @@ func profileLanguage(profile string) string {
 	switch profile {
 	case "python-uv":
 		return "python"
-	case "node-npm":
+	case "node-npm", "mise-project":
 		return "node"
 	}
 	return "go"

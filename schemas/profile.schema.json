@@ -18,7 +18,8 @@
         "base",
         "go",
         "python-uv",
-        "node-npm"
+        "node-npm",
+        "mise-project"
       ]
     },
     "rules": {

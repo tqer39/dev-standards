@@ -56,8 +56,8 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	}
 	var m Manifest
 	if initial {
-		if req.Profile != "go" && req.Profile != "python-uv" && req.Profile != "node-npm" {
-			return nil, fmt.Errorf("supported profiles: go, python-uv, node-npm")
+		if req.Profile != "go" && req.Profile != "python-uv" && req.Profile != "node-npm" && req.Profile != "mise-project" {
+			return nil, fmt.Errorf("supported profiles: go, python-uv, node-npm, mise-project")
 		}
 		if req.Instructions != "" && req.Instructions != "rulesync" {
 			return nil, fmt.Errorf("supported instruction generators: rulesync")
@@ -108,6 +108,18 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	if err := validateManifest(m); err != nil {
 		return nil, err
 	}
+	if m.CI.NodePreflight != "" {
+		if m.Components[0].Profile != "node-npm" {
+			return nil, fmt.Errorf("ci.nodePreflight requires node-npm")
+		}
+		preflight, err := read(m.CI.NodePreflight)
+		if err != nil {
+			return nil, err
+		}
+		if !preflight.Exists || strings.TrimSpace(preflight.Content) == "" {
+			return nil, fmt.Errorf("ci.nodePreflight must name an existing nonempty script")
+		}
+	}
 	component := m.Components[0]
 	if err := t.validateLayoutFor(component); err != nil {
 		return nil, err
@@ -133,6 +145,16 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	} else if component.Profile == "node-npm" {
 		if err := validateNodeInputs(p, component); err != nil {
 			return nil, err
+		}
+	} else if component.Profile == "mise-project" {
+		names, err := t.projectInputs()
+		if err != nil {
+			return nil, err
+		}
+		for _, name := range names {
+			if _, err := read(name); err != nil {
+				return nil, err
+			}
 		}
 	} else if !p.Inputs["go.mod"].Exists {
 		return nil, fmt.Errorf("a Go module is required before adoption")
@@ -241,6 +263,9 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	if component.Profile == "python-uv" {
 		lock.PythonVersion = parsedMise.Tools["python"]
 		lock.UVVersion = parsedMise.Tools["uv"]
+	}
+	if component.Profile == "mise-project" {
+		lock.ProjectToolsSHA256 = sum(string(JSON(parsedMise.Tools)))
 	}
 	if component.Profile == "node-npm" {
 		lock.NodeVersion = parsedMise.Tools["node"]
@@ -434,7 +459,11 @@ func renderMiseFor(local, profileID string) (string, error) {
 	if s != "" && !strings.HasSuffix(s, "\n") {
 		s += "\n"
 	}
-	if profileID == "python-uv" {
+	if profileID == "mise-project" {
+		if err := validateMiseProject(cfg); err != nil {
+			return "", err
+		}
+	} else if profileID == "python-uv" {
 		if err := validatePythonTools(cfg); err != nil {
 			return "", err
 		}
@@ -591,6 +620,9 @@ func (t *Tree) committedDeletion(name string, current Snapshot) bool {
 }
 
 func (t *Tree) validateLayoutFor(component Component) error {
+	if component.Profile == "mise-project" {
+		return nil
+	}
 	return fs.WalkDir(t.fs.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err

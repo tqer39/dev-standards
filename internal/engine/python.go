@@ -97,6 +97,9 @@ run = "dev-standards verify"
 	if c.Profile == "node-npm" {
 		base = nodeTasks(c)
 	}
+	if c.Profile == "mise-project" {
+		base = projectTasks()
+	}
 	var extensions map[string]any
 	_, _ = toml.Decode(project, &extensions) // Plan validates the same source first.
 	for _, task := range []string{"bootstrap", "lint", "format", "format:check", "test", "build"} {
@@ -117,8 +120,11 @@ run = """{% set lock = read_json(path='.standards/lock.json') %}{% if lock.versi
 `
 }
 
-func componentWorkflow(m Manifest) string {
+func componentWorkflow(m Manifest, project string) string {
 	workflow := projectWorkflow
+	if m.CI.NodePreflight != "" {
+		workflow = strings.Replace(workflow, "      - uses: jdx/mise-action@", "      - run: node "+m.CI.NodePreflight+"\n      - uses: jdx/mise-action@", 1)
+	}
 	if m.AI.Instructions == "rulesync" {
 		workflow = strings.Replace(workflow, "'.standards/tasks.standards.toml', 'AGENTS.md',", "'.standards/tasks.standards.toml', '"+rulesyncEntryPath+"',", 1)
 	}
@@ -128,6 +134,15 @@ func componentWorkflow(m Manifest) string {
 	workflow = strings.Replace(workflow, "  workflow-result:", "  standards-check:", 1)
 	if m.Components[0].Profile == "node-npm" {
 		// npm scripts need node_modules, unlike uv run and go which fetch on demand.
+		bootstrap := "      - run: npm ci --ignore-scripts --prefix " + m.Components[0].Path + "\n"
+		var extensions map[string]any
+		_, _ = toml.Decode(project, &extensions)
+		if _, ok := extensions["project:bootstrap"]; ok {
+			bootstrap += "      - run: mise run project:bootstrap\n"
+		}
+		workflow = strings.Replace(workflow, "      - run: mise run lint\n", bootstrap+"      - run: mise run lint\n", 1)
+	}
+	if m.Components[0].Profile == "mise-project" {
 		workflow = strings.Replace(workflow, "      - run: mise run lint\n", "      - run: mise run bootstrap\n      - run: mise run lint\n", 1)
 	}
 	return strings.Replace(workflow, "      - run: gofmt -l . > /tmp/formatting && test ! -s /tmp/formatting", "      - run: mise run format:check", 1)

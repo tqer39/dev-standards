@@ -17,7 +17,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-const Version = "0.3.1"
+const Version = "0.3.2"
 const Repository = "tqer39/dev-standards"
 
 //go:embed schemas rules guidance profiles templates
@@ -198,7 +198,7 @@ type Profile struct {
 
 // ResolveProfile validates both shared and language-specific references.
 func ResolveProfile(id string) (Profile, error) {
-	if id != "go" && id != "python-uv" && id != "node-npm" {
+	if id != "go" && id != "python-uv" && id != "node-npm" && id != "mise-project" {
 		return Profile{}, fmt.Errorf("unsupported profile: %s", id)
 	}
 	rules, err := Catalog()
