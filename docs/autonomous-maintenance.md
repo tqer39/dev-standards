@@ -67,6 +67,7 @@ Node.js/npm では `--profile node-npm` を追加する。AGENTS.md を rulesync
 
 ```sh
 mise run standards:prepare
+mise run standards:version
 mise run standards:verify
 mise run standards:finish
 ```

@@ -110,7 +110,11 @@ run = "dev-standards verify"
 		}
 		base = strings.Replace(base, header, header+fmt.Sprintf("depends = [%q]\n", extension), 1)
 	}
-	return base
+	return base + `
+["standards:version"]
+description = "ロックに記録した dev-standards の適用版を表示"
+run = """{% set lock = read_json(path='.standards/lock.json') %}{% if lock.version is matching(pat="^[0-9]+[.][0-9]+[.][0-9]+$") %}echo "dev-standards 適用版: {{ lock.version }}"{% else %}exit 2{% endif %}"""
+`
 }
 
 func componentWorkflow(m Manifest) string {

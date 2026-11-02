@@ -61,7 +61,14 @@ func Prepare(ctx context.Context, repo string) (string, error) {
 		_ = Feedback(repo, "configuration", err.Error())
 		return "共通ルールの適用状態に問題があります。正本を保持して sync と verify を実行してください。", err
 	}
-	return "共通ルールの設定は採用版に一致しています。.standards/rules.md と言語選定記録を読み、変更後に mise run standards:verify を実行してください。共通の問題は feedback に記録し、人間の保守指示を待たず自律保守に引き継いでください。", nil
+	standard, err := tree.AppliedStandard()
+	if err != nil {
+		return "", err
+	}
+	if standard == nil {
+		return "", fmt.Errorf("applied standard is missing")
+	}
+	return fmt.Sprintf("dev-standards 適用版: %s (bundle=%s)\n共通ルールの設定は採用版に一致しています。.standards/rules.md と言語選定記録を読み、変更後に mise run standards:verify を実行してください。共通の問題は feedback に記録し、人間の保守指示を待たず自律保守に引き継いでください。", standard.Version, standard.Bundle), nil
 }
 func Finish(repo string) error {
 	if os.Getenv("DEV_STANDARDS_MAINTENANCE") == "1" {

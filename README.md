@@ -149,6 +149,21 @@ dev-standards は AGENTS.md を書き換えず、共通の入口を `.rulesync/r
 適用後に `rulesync generate` で AGENTS.md を再生成してください。
 `check` は、AGENTS.md に共通の入口が含まれていない場合に失敗します。
 
+## 適用版の確認
+
+利用先では次のコマンドで、ロックに記録された適用版を確認できます。
+起動用 CLI が古い場合も、その CLI の版ではなく `.standards/lock.json` の値を表示します。
+
+```sh
+mise run standards:version
+```
+
+表示例は `dev-standards 適用版: 0.3.1` です。この表示は設定やテストの成功を意味しません。
+`mise run standards:prepare` では、設定の整合性を確認した後に適用版とバンドルの SHA-256 も表示します。
+`dev-standards inspect` の `standard` にも、採用リポジトリ、版、バンドルの SHA-256 を含めます。
+未導入の場合は `standard` を出力せず、壊れたロックを成功扱いにしません。
+`dev-standards version` / `--version` は、実行している CLI 自身の版を表示します。
+
 ## 再適用
 
 ```sh

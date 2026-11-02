@@ -684,3 +684,32 @@ func TestProjectInstructionOwnership(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareShowsAppliedVersionOnlyAfterCheck(t *testing.T) {
+	t.Setenv("DEV_STANDARDS_MAINTENANCE", "")
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	put(t, dir, "go.mod", "module example.com/project\n\ngo 1.27.3\n")
+	put(t, dir, "decision.md", "# 言語選定\n\n## 要件\n\n複数の OS で動作する CLI を開発する。\n\n## 候補\n\nGo と Python を配布方法から比較する。\n\n## 選定理由\n\nGo を採用し単体バイナリを配布する。\n")
+	tree, err := engine.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tree.Close()
+	plan, err := tree.Plan(engine.Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	text, err := Prepare(context.Background(), dir)
+	if err != nil || !strings.Contains(text, "適用版: "+bundle.Version) || !strings.Contains(text, "bundle="+bundle.Digest()) {
+		t.Fatalf("prepare: %s %v", text, err)
+	}
+	put(t, dir, ".editorconfig", "user edit\n")
+	text, err = Prepare(context.Background(), dir)
+	if err == nil || strings.Contains(text, "適用版:") {
+		t.Fatalf("failed check reported a validated version: %s %v", text, err)
+	}
+}

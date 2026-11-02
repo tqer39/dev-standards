@@ -19,7 +19,7 @@ const vendorPath = ".standards/vendor/gitignore/go-linux-macos-windows.txt"
 const ignoreURL = "https://www.toptal.com/developers/gitignore/api/go,linux,macos,windows"
 
 var managedPaths = []string{".editorconfig", ".gitignore", ".gitattributes", "mise.toml", ".standards/tasks.standards.toml"}
-var reservedTasks = []string{"bootstrap", "lint", "format", "format:check", "test", "build", "check", "standards:plan", "standards:check", "standards:verify", "standards:prepare", "standards:finish"}
+var reservedTasks = []string{"bootstrap", "lint", "format", "format:check", "test", "build", "check", "standards:plan", "standards:check", "standards:verify", "standards:prepare", "standards:finish", "standards:version"}
 
 func (t *Tree) Plan(req Request) (*Plan, error) {
 	if _, err := bundle.ResolveProfile("go"); err != nil {
