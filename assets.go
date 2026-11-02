@@ -17,7 +17,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-const Version = "0.3.1"
+const Version = "0.4.0"
 const Repository = "tqer39/dev-standards"
 
 //go:embed schemas rules guidance profiles templates

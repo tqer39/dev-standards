@@ -37,6 +37,9 @@ func validateManifest(m Manifest) error {
 	if len(m.Components) != 1 {
 		return fmt.Errorf("exactly one component is supported")
 	}
+	if err := validateCompanions(m); err != nil {
+		return err
+	}
 	c := m.Components[0]
 	if _, err := bundle.ResolveProfile(c.Profile); err != nil {
 		return err
@@ -61,11 +64,19 @@ func validateManifest(m Manifest) error {
 }
 func languageDecisionFor(s, profile string) error {
 	s = normalized(s)
-	for _, heading := range []string{"## 要件", "## 候補", "## 選定理由"} {
-		_, tail, ok := strings.Cut(s, heading+"\n")
-		if !ok || len(strings.TrimSpace(strings.Split(tail, "\n## ")[0])) < 8 {
-			return fmt.Errorf("language decision needs a substantive %q section", heading)
+	valid := false
+	for _, headings := range [][]string{{"## 要件", "## 候補", "## 選定理由"}, {"## Requirements", "## Candidates", "## Selection rationale"}} {
+		complete := true
+		for _, heading := range headings {
+			_, tail, ok := strings.Cut(s, heading+"\n")
+			if !ok || len(strings.TrimSpace(strings.Split(tail, "\n## ")[0])) < 8 {
+				complete = false
+			}
 		}
+		valid = valid || complete
+	}
+	if !valid {
+		return fmt.Errorf("language decision needs substantive requirements, candidates and selection rationale sections (English or Japanese)")
 	}
 	language := profileLanguage(profile)
 	names := []string{language}

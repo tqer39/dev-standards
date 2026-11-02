@@ -89,6 +89,11 @@
           "enum": [
             "rulesync"
           ]
+        },
+        "language": {
+          "enum": [
+            "en"
+          ]
         }
       },
       "required": [
@@ -168,6 +173,36 @@
         "minimumSamples",
         "breachWindows"
       ]
+    },
+    "companions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "profile": {
+            "enum": [
+              "go",
+              "swift"
+            ]
+          },
+          "verifyTask": {
+            "type": "string",
+            "pattern": "^project:verify:[a-z][a-z0-9-]*$"
+          }
+        },
+        "required": [
+          "path",
+          "profile",
+          "verifyTask"
+        ]
+      }
     }
   },
   "required": [

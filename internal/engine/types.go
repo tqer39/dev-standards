@@ -16,10 +16,12 @@ type Manifest struct {
 	} `json:"standard"`
 	Platforms  []string    `json:"platforms"`
 	Components []Component `json:"components"`
+	Companions []Companion `json:"companions,omitempty"`
 	AI         struct {
 		Targets []string `json:"targets"`
 		// Instructions names an external generator that owns AGENTS.md.
 		Instructions string `json:"instructions,omitempty"`
+		Language     string `json:"language,omitempty"`
 	} `json:"ai"`
 	Gitignore struct {
 		Templates []string `json:"templates"`
@@ -41,6 +43,14 @@ type Component struct {
 	Path    string `json:"path"`
 	Profile string `json:"profile"`
 }
+
+// Companion is an explicitly declared package whose existing project task
+// verifies it. It is not silently treated as covered by the primary profile.
+type Companion struct {
+	Path       string `json:"path"`
+	Profile    string `json:"profile"`
+	VerifyTask string `json:"verifyTask"`
+}
 type Snapshot struct {
 	Exists  bool   `json:"exists"`
 	Content string `json:"content"`
@@ -52,12 +62,14 @@ type Change struct {
 	After  Snapshot `json:"after"`
 }
 type Request struct {
-	Mode          string `json:"mode"`
-	Automation    bool   `json:"automation,omitempty"`
-	Profile       string `json:"profile,omitempty"`
-	DecisionPath  string `json:"decisionPath,omitempty"`
-	ComponentPath string `json:"componentPath,omitempty"`
-	Instructions  string `json:"instructions,omitempty"`
+	Mode                string `json:"mode"`
+	Automation          bool   `json:"automation,omitempty"`
+	Profile             string `json:"profile,omitempty"`
+	DecisionPath        string `json:"decisionPath,omitempty"`
+	ComponentPath       string `json:"componentPath,omitempty"`
+	Instructions        string `json:"instructions,omitempty"`
+	CompanionsPath      string `json:"companionsPath,omitempty"`
+	InstructionLanguage string `json:"instructionLanguage,omitempty"`
 }
 type Plan struct {
 	SchemaVersion int                 `json:"schemaVersion"`

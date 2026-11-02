@@ -19,7 +19,7 @@ const vendorPath = ".standards/vendor/gitignore/go-linux-macos-windows.txt"
 const ignoreURL = "https://www.toptal.com/developers/gitignore/api/go,linux,macos,windows"
 
 var managedPaths = []string{".editorconfig", ".gitignore", ".gitattributes", "mise.toml", ".standards/tasks.standards.toml"}
-var reservedTasks = []string{"bootstrap", "lint", "format", "format:check", "test", "build", "check", "standards:plan", "standards:check", "standards:verify", "standards:prepare", "standards:finish", "standards:version"}
+var reservedTasks = []string{"bootstrap", "lint", "format", "format:check", "test", "build", "check", "standards:plan", "standards:check", "standards:verify", "standards:prepare", "standards:finish", "standards:version", "standards:companions"}
 
 func (t *Tree) Plan(req Request) (*Plan, error) {
 	if _, err := bundle.ResolveProfile("go"); err != nil {
@@ -43,6 +43,14 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	}
 	for _, name := range names {
 		if _, err := read(name); err != nil {
+			return nil, err
+		}
+	}
+	if req.CompanionsPath != "" {
+		if err := validPath(req.CompanionsPath); err != nil {
+			return nil, err
+		}
+		if _, err := read(req.CompanionsPath); err != nil {
 			return nil, err
 		}
 	}
@@ -72,8 +80,19 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		m.Components[0].Profile = req.Profile
 		m.Gitignore.Templates[0] = profileLanguage(req.Profile)
 		m.AI.Instructions = req.Instructions
+		m.AI.Language = req.InstructionLanguage
+		if req.CompanionsPath != "" {
+			if err := bundle.Decode([]byte(p.Inputs[req.CompanionsPath].Content), "companions", &m.Companions); err != nil {
+				return nil, err
+			}
+			for _, c := range m.Companions {
+				if c.Profile == "swift" {
+					m.Platforms = []string{"macos"}
+				}
+			}
+		}
 	} else {
-		if req.Profile != "" || req.DecisionPath != "" || req.ComponentPath != "" || req.Instructions != "" {
+		if req.Profile != "" || req.DecisionPath != "" || req.ComponentPath != "" || req.Instructions != "" || req.CompanionsPath != "" || req.InstructionLanguage != "" {
 			return nil, fmt.Errorf("reapply does not accept adoption options")
 		}
 		if err := bundle.Decode([]byte(p.Inputs[".standards/repository.yml"].Content), "repository", &m); err != nil {
@@ -109,7 +128,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		return nil, err
 	}
 	component := m.Components[0]
-	if err := t.validateLayoutFor(component); err != nil {
+	if err := t.validateLayoutWithCompanions(component, m.Companions); err != nil {
 		return nil, err
 	}
 	vendorPath, ignoreURL := vendorPath, ignoreURL
@@ -136,6 +155,14 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		}
 	} else if !p.Inputs["go.mod"].Exists {
 		return nil, fmt.Errorf("a Go module is required before adoption")
+	}
+	for _, c := range m.Companions {
+		if _, err := read(companionMarker(c)); err != nil {
+			return nil, err
+		}
+		if !p.Inputs[companionMarker(c)].Exists {
+			return nil, fmt.Errorf("missing companion manifest: %s", companionMarker(c))
+		}
 	}
 	desired := map[string]Snapshot{}
 	seed := func(name, content string) {
@@ -205,6 +232,9 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	if err := validateProjectTasks(p.Inputs[".standards/tasks.project.toml"].Content); err != nil {
 		return nil, err
 	}
+	if err := validateCompanionTasks(m, p.Inputs[".standards/tasks.project.toml"].Content); err != nil {
+		return nil, err
+	}
 	rootMise, err := renderMiseFor(miseLocal, component.Profile)
 	if err != nil {
 		return nil, err
@@ -236,6 +266,11 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	}
 	if _, err := toml.Decode(rootMise, &parsedMise); err != nil {
 		return nil, err
+	}
+	for _, c := range m.Companions {
+		if c.Profile == "go" && !pinnedGo(parsedMise.Tools["go"]) {
+			return nil, fmt.Errorf("Go companions require an exact tools.go version")
+		}
 	}
 	lock := Lock{SchemaVersion: 1, Repository: bundle.Repository, Version: bundle.Version, Bundle: bundle.Digest(), GitignoreSHA256: sum(snapshot), GitignoreURL: ignoreURL, GoVersion: parsedMise.Tools["go"]}
 	if component.Profile == "python-uv" {
@@ -282,16 +317,19 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		desired[".gitattributes"] = attrs
 	}
 	desired["mise.toml"] = file(rootMise)
-	desired[".standards/tasks.standards.toml"] = file(componentTasks(component, p.Inputs[".standards/tasks.project.toml"].Content))
+	desired[".standards/tasks.standards.toml"] = file(tasksWithCompanions(m, p.Inputs[".standards/tasks.project.toml"].Content))
 	if len(automationPathsFor(m)) > 0 {
 		if err := t.automationFiles(p, desired, m); err != nil {
 			return nil, err
 		}
 	}
 	if len(m.AI.Targets) > 0 {
-		desired[".standards/tasks.standards.toml"] = file(automatedTasksFor(componentTasks(component, p.Inputs[".standards/tasks.project.toml"].Content)))
+		desired[".standards/tasks.standards.toml"] = file(automatedTasksFor(tasksWithCompanions(m, p.Inputs[".standards/tasks.project.toml"].Content)))
 	}
 	required := append([]string{vendorPath}, componentInputs(component)...)
+	for _, c := range m.Companions {
+		required = append(required, companionMarker(c))
+	}
 	if len(automationPathsFor(m)) > 0 {
 		required = append(required, automationPathsFor(m)...)
 	}
@@ -591,6 +629,9 @@ func (t *Tree) committedDeletion(name string, current Snapshot) bool {
 }
 
 func (t *Tree) validateLayoutFor(component Component) error {
+	return t.validateLayoutWithCompanions(component, nil)
+}
+func (t *Tree) validateLayoutWithCompanions(component Component, companions []Companion) error {
 	return fs.WalkDir(t.fs.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -600,6 +641,11 @@ func (t *Tree) validateLayoutFor(component Component) error {
 				return fs.SkipDir
 			}
 			return nil
+		}
+		for _, c := range companions {
+			if p == companionMarker(c) {
+				return nil
+			}
 		}
 		switch d.Name() {
 		case "go.mod":
