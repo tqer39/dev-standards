@@ -12,6 +12,14 @@ import (
 )
 
 func publish(ctx context.Context, x Executor, dir string, e Entry, base string, c Config, checkpoints ...func(string) error) (string, error) {
+	title := "chore: 共通ルールの自律保守"
+	if e.Role == "project" {
+		var err error
+		title, err = projectMessage(dir, title)
+		if err != nil {
+			return "", err
+		}
+	}
 	candidate, err := git(ctx, x, dir, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err
@@ -62,7 +70,7 @@ func publish(ctx context.Context, x Executor, dir string, e Entry, base string, 
 	if len(open) > 0 {
 		number = open[0].Number
 	} else {
-		output, err := x.Run(ctx, dir, "gh", []string{"pr", "create", "--repo", repo, "--base", e.Branch, "--head", branch, "--title", "chore: 共通ルールの自律保守", "--body", "固定された変更範囲と予算、独立した読み取り専用レビュー、ローカル検証を通過した変更です。CI の成功と対象コミットを確認した後、自律保守がマージします。"}, "")
+		output, err := x.Run(ctx, dir, "gh", []string{"pr", "create", "--repo", repo, "--base", e.Branch, "--head", branch, "--title", title, "--body", "固定された変更範囲と予算、独立した読み取り専用レビュー、ローカル検証を通過した変更です。CI の成功と対象コミットを確認した後、自律保守がマージします。"}, "")
 		if err != nil {
 			return "", err
 		}
