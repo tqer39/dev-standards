@@ -90,7 +90,7 @@ func publish(ctx context.Context, x Executor, dir string, e Entry, base string, 
 		return "", fmt.Errorf("merge was not confirmed")
 	}
 	if err = waitCI(ctx, x, dir, repo, merged, workflow); err != nil {
-		return "", err
+		return merged, err
 	}
 	return merged, nil
 }
