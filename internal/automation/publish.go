@@ -78,6 +78,9 @@ func publish(ctx context.Context, x Executor, dir string, e Entry, base string, 
 	if err = waitCI(ctx, x, dir, repo, candidate, workflow); err != nil {
 		return "", err
 	}
+	if err = waitMergeReady(ctx, x, dir, repo, number, candidate); err != nil {
+		return "", err
+	}
 	if _, err = x.Run(ctx, dir, "gh", []string{"pr", "merge", fmt.Sprint(number), "--repo", repo, "--squash", "--match-head-commit", candidate}, ""); err != nil {
 		return "", err
 	}
@@ -99,6 +102,59 @@ func publish(ctx context.Context, x Executor, dir string, e Entry, base string, 
 	}
 	return merged, nil
 }
+
+// Aggregate required checks may not exist yet while their prerequisite jobs run.
+// GitHub's merge state also covers these missing checks and other branch rules.
+func waitMergeReady(ctx context.Context, x Executor, dir, repo string, number int, candidate string) error {
+	for {
+		out, err := x.Run(ctx, dir, "gh", []string{"pr", "view", fmt.Sprint(number), "--repo", repo, "--json", "headRefOid,mergeStateStatus,statusCheckRollup"}, "")
+		if err != nil {
+			return err
+		}
+		var state struct {
+			Head   string `json:"headRefOid"`
+			State  string `json:"mergeStateStatus"`
+			Checks []struct {
+				Name       string `json:"name"`
+				Context    string `json:"context"`
+				State      string `json:"state"`
+				Conclusion string `json:"conclusion"`
+			} `json:"statusCheckRollup"`
+		}
+		if err := json.Unmarshal([]byte(out), &state); err != nil {
+			return err
+		}
+		if state.Head != candidate {
+			return fmt.Errorf("pull request head changed while waiting for branch requirements")
+		}
+		for _, check := range state.Checks {
+			for _, result := range []string{check.State, check.Conclusion} {
+				switch result {
+				case "FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STALE", "STARTUP_FAILURE":
+					name := check.Name
+					if name == "" {
+						name = check.Context
+					}
+					return fmt.Errorf("pull request check did not succeed: %s (%s)", name, result)
+				}
+			}
+		}
+		switch state.State {
+		case "CLEAN":
+			return nil
+		case "BLOCKED", "BEHIND", "UNKNOWN", "HAS_HOOKS", "UNSTABLE":
+			// Keep all branch requirements in force, within the original budget.
+		default:
+			return fmt.Errorf("pull request is not ready to merge: %s", state.State)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("branch requirements confirmation: %w", ctx.Err())
+		case <-time.After(10 * time.Second):
+		}
+	}
+}
+
 func waitCI(ctx context.Context, x Executor, dir, repo, sha, path string) error {
 	for {
 		out, err := x.Run(ctx, dir, "gh", []string{"api", "repos/" + repo + "/actions/runs?head_sha=" + sha + "&per_page=100"}, "")

@@ -898,6 +898,9 @@ type pendingPublishProbe struct {
 	apiCalls        int
 	merged          string
 	crashAfterMerge bool
+	readiness       []string
+	readinessCalls  int
+	mergeCalls      int
 }
 
 func (p *pendingPublishProbe) Run(ctx context.Context, dir, exe string, args []string, input string) (string, error) {
@@ -922,8 +925,18 @@ func (p *pendingPublishProbe) Run(ctx context.Context, dir, exe string, args []s
 	case "pr create":
 		return "https://github.com/example/source/pull/1", nil
 	case "pr merge":
+		p.mergeCalls++
 		return "", nil
 	case "pr view":
+		if args[len(args)-1] == "headRefOid,mergeStateStatus,statusCheckRollup" {
+			state := "CLEAN"
+			if p.readinessCalls < len(p.readiness) {
+				state = p.readiness[p.readinessCalls]
+			}
+			p.readinessCalls++
+			head, err := (Exec{}).Run(ctx, dir, "git", []string{"rev-parse", "HEAD"}, "")
+			return fmt.Sprintf(`{"headRefOid":%q,"mergeStateStatus":%q}`, strings.TrimSpace(head), state), err
+		}
 		return p.merged, nil
 	}
 	return "", fmt.Errorf("unexpected GitHub operation: %v", args)
@@ -942,6 +955,74 @@ func TestPublishRetainsMergedCommitWhenPostMergeCIFails(t *testing.T) {
 	sha, err := publish(context.Background(), probe, source, entry, base, Default(entry))
 	if err == nil || sha != probe.merged || probe.apiCalls != 2 {
 		t.Fatalf("post-merge checkpoint lost: %s %v (%d calls)", sha, err, probe.apiCalls)
+	}
+}
+
+func TestPublishWaitsForBranchRequirementsAfterCommonCISucceeds(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	bare(t, remote)
+	source := filepath.Join(root, "source")
+	put(t, source, "file.txt", "content\n")
+	repository(t, source, remote)
+	base := runGit(t, source, "rev-parse", "HEAD")
+	upstream := "https://github.com/example/source"
+	probe := &pendingPublishProbe{fakeCodex: fakeCodex{RemoteAlias: map[string]string{upstream: remote}}, merged: strings.Repeat("e", 40), readiness: []string{"BLOCKED", "CLEAN"}}
+	entry := Entry{Path: source, Remote: upstream, Branch: "main", Role: "source"}
+	sha, err := publish(context.Background(), probe, source, entry, base, Default(entry))
+	// The existing probe deliberately fails post-merge CI. Merge must still have
+	// waited for GitHub to confirm all branch requirements on the same head.
+	if err == nil || sha != probe.merged || probe.readinessCalls != 2 || probe.mergeCalls != 1 {
+		t.Fatalf("branch requirements were not awaited: sha=%s err=%v polls=%d merges=%d", sha, err, probe.readinessCalls, probe.mergeCalls)
+	}
+}
+
+type mergeStateStub struct{ head, state string }
+
+func (s mergeStateStub) Run(context.Context, string, string, []string, string) (string, error) {
+	if s.state == "LEGACY_FAILURE" {
+		return fmt.Sprintf(`{"headRefOid":%q,"mergeStateStatus":"BLOCKED","statusCheckRollup":[{"context":"legacy required CI","state":"FAILURE"}]}`, s.head), nil
+	}
+	if s.state == "FAILURE" || s.state == "CANCELLED" {
+		return fmt.Sprintf(`{"headRefOid":%q,"mergeStateStatus":"BLOCKED","statusCheckRollup":[{"name":"other required CI","conclusion":%q}]}`, s.head, s.state), nil
+	}
+	return fmt.Sprintf(`{"headRefOid":%q,"mergeStateStatus":%q}`, s.head, s.state), nil
+}
+
+func TestMergeReadinessRequiresSameHeadAndAllBranchRequirements(t *testing.T) {
+	for _, tc := range []struct {
+		name, head, state string
+		cancel, success   bool
+	}{
+		{"ready", "candidate", "CLEAN", false, true},
+		{"head replaced", "other", "CLEAN", false, false},
+		{"conflict", "candidate", "DIRTY", false, false},
+		{"draft", "candidate", "DRAFT", false, false},
+		{"failed checks", "candidate", "FAILURE", false, false},
+		{"legacy failed check", "candidate", "LEGACY_FAILURE", false, false},
+		{"cancelled checks", "candidate", "CANCELLED", false, false},
+		{"pending optional checks", "candidate", "UNSTABLE", true, false},
+		{"missing required check", "candidate", "BLOCKED", true, false},
+		{"unknown within budget", "candidate", "UNKNOWN", true, false},
+		{"malformed state", "candidate", "", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancel {
+				cancel()
+			}
+			err := waitMergeReady(ctx, mergeStateStub{tc.head, tc.state}, t.TempDir(), "owner/repo", 1, "candidate")
+			if (err == nil) != tc.success {
+				t.Fatalf("readiness result: %v", err)
+			}
+			if tc.cancel && !strings.Contains(err.Error(), "context canceled") {
+				t.Fatalf("budget cancellation ignored: %v", err)
+			}
+			if tc.state == "LEGACY_FAILURE" && !strings.Contains(err.Error(), "legacy required CI") {
+				t.Fatalf("failed status context was not identified: %v", err)
+			}
+		})
 	}
 }
 
