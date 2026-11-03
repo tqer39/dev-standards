@@ -85,12 +85,7 @@ func (m Maintainer) Run(ctx context.Context, c Config, state string) (Ledger, er
 		if err != nil {
 			report.Outcomes = append(report.Outcomes, Outcome{Repository: c.Source.Remote, Status: "failed", Detail: err.Error()})
 		}
-		b, _ := json.MarshalIndent(report, "", "  ")
-		tmp := filepath.Join(state, "latest.tmp")
-		if e := os.WriteFile(tmp, append(b, '\n'), 0600); e != nil {
-			return report, errors.Join(err, e)
-		}
-		if e := os.Rename(tmp, filepath.Join(state, "latest.json")); e != nil {
+		if e := saveLedger(state, report); e != nil {
 			return report, errors.Join(err, e)
 		}
 		return report, err
@@ -160,7 +155,10 @@ func (m Maintainer) Run(ctx context.Context, c Config, state string) (Ledger, er
 		if err = commit(ctx, x, source, "chore: 共通開発ルールを自律更新"); err != nil {
 			return finish(err)
 		}
-		sha, err := publish(ctx, x, source, c.Source, base, c)
+		sha, err := publish(ctx, x, source, c.Source, base, c, func(sha string) error {
+			report.PendingSource = sha
+			return saveLedger(state, report)
+		})
 		if err != nil {
 			if sha != "" {
 				report.PendingSource = sha
@@ -209,9 +207,12 @@ func (m Maintainer) Run(ctx context.Context, c Config, state string) (Ledger, er
 	if err = tagRelease(ctx, x, source, c.Source); err != nil {
 		return finish(err)
 	}
-	report.PendingSource = ""
+	report.PendingSource = report.Outcomes[0].Commit
 	report.Bundle = digest
 	report.Executable = destination
+	if err := saveLedger(state, report); err != nil {
+		return finish(err)
+	}
 	projects := append([]Entry{}, c.Projects...)
 	sort.SliceStable(projects, func(i, j int) bool { return projects[i].Canary && !projects[j].Canary })
 	for i, e := range projects {
@@ -221,7 +222,7 @@ func (m Maintainer) Run(ctx context.Context, c Config, state string) (Ledger, er
 			return finish(err)
 		}
 	}
-	if learn || resumeRollout {
+	if learn {
 		report.LearnedAt = m.clock()
 	}
 	if !resumeRollout {
@@ -229,8 +230,21 @@ func (m Maintainer) Run(ctx context.Context, c Config, state string) (Ledger, er
 			return finish(err)
 		}
 	}
+	report.PendingSource = ""
 	return finish(nil)
 }
+func saveLedger(state string, report Ledger) error {
+	data, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := filepath.Join(state, "latest.tmp")
+	if err := os.WriteFile(tmp, append(data, '\n'), 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(state, "latest.json"))
+}
+
 func (m Maintainer) project(ctx context.Context, x Executor, e Entry, c Config, binary, work string, index int) (Outcome, error) {
 	o := Outcome{Repository: e.Remote, Status: "failed"}
 	dir := filepath.Join(work, fmt.Sprintf("project-%d", index))
