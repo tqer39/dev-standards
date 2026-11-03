@@ -19,4 +19,7 @@ Go は `go mod download`、Python/uv は `uv sync --locked`、Node.js/npm は
 
 CI でも採用版の CLI で正本から再生成して照合する。保存済みスナップショット同士の一致だけで適合としない。
 
+保守用の新規 checkout でも、宣言した bootstrap で依存を準備してから検証する。
+ルール生成を使う利用先では、既存の生成タスクを実行して正本と生成物を照合する。
+
 呼び出し方は [mise の CLI リファレンス](https://mise.jdx.dev/cli/) を参照する。
