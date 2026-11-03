@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	bundle "github.com/tqer39/dev-standards"
 )
 
 func componentFile(c Component, name string) string { return path.Join(c.Path, name) }
@@ -121,7 +122,7 @@ run = """{% set lock = read_json(path='.standards/lock.json') %}{% if lock.versi
 }
 
 func componentWorkflow(m Manifest, project string) string {
-	workflow := projectWorkflow
+	workflow := strings.ReplaceAll(projectWorkflow, "STANDARDS_VERSION", bundle.Version)
 	if m.CI.NodePreflight != "" {
 		workflow = strings.Replace(workflow, "      - uses: jdx/mise-action@", "      - run: node "+m.CI.NodePreflight+"\n      - uses: jdx/mise-action@", 1)
 	}

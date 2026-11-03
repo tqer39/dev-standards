@@ -14,12 +14,12 @@ var automationInputs = []string{"AGENTS.md", ".codex/hooks.json", ".standards/ag
 // delivered as a rulesync rule instead.
 const rulesyncEntryPath = ".rulesync/rules/dev-standards.md"
 
-const agentsEntry = "# 共通開発ルール\n\n作業開始時に `.standards/rules.md` を読み、`mise run standards:prepare` を実行する。\n作業終了前に `mise run standards:finish` を実行する。\n不足する設定は整備し、共通ルールの問題は `dev-standards feedback` で記録する。\n共通ルールの保守に人間の追加指示・承認を待たず、設定済みの自律保守に引き継ぐ。\n"
+const agentsEntry = "# 共通開発ルール\n\n作業開始時に `.standards/rules.md` を読み、`mise run standards:prepare` を実行する。\n作業終了前に `mise run standards:finish` を実行する。\n不足する設定は整備し、共通ルールの問題は `mise run standards:feedback` で記録する。\n共通ルールの保守に人間の追加指示・承認を待たず、設定済みの自律保守に引き継ぐ。\n"
 
 func instructionsEntry(m Manifest) string {
 	if m.AI.Language == "en" {
 		if len(m.AI.Targets) > 0 {
-			return "## Shared development standards\n\nRead `.standards/rules.md` and run `mise run standards:prepare` before working.\nRun `mise run standards:verify` and `mise run standards:finish` before finishing.\nEdit canonical sources under `.standards`, then review and apply a generated plan.\nRecord evidence of shared-rule problems with `dev-standards feedback`.\nReport checks that were not run accurately.\n"
+			return "## Shared development standards\n\nRead `.standards/rules.md` and run `mise run standards:prepare` before working.\nRun `mise run standards:verify` and `mise run standards:finish` before finishing.\nEdit canonical sources under `.standards`, then review and apply a generated plan.\nRecord evidence of shared-rule problems with `mise run standards:feedback`.\nReport checks that were not run accurately.\n"
 		}
 		return "## Shared development standards\n\nRead `.standards/rules.md` and the language decision before working.\nEdit canonical sources and regenerate managed files.\nRun `mise run standards:verify` before finishing; do not claim unrun checks passed.\n"
 	}
@@ -166,6 +166,9 @@ run = "./.standards/cache/dev-standards prepare"
 
 ["standards:finish"]
 run = "./.standards/cache/dev-standards finish"
+
+["standards:feedback"]
+run = "./.standards/cache/dev-standards feedback"
 `
 }
 
@@ -213,6 +216,8 @@ jobs:
               assert not target.is_symlink(), name
               assert expected['exists'] and target.read_bytes() == expected['content'].encode(), name
           PYTHON
+      - name: Check canonical sources with pinned CLI
+        run: mise exec go@1.27.3 -- go run github.com/tqer39/dev-standards/cmd/dev-standards@vSTANDARDS_VERSION check --repo .
       - run: mise run lint
       - run: gofmt -l . > /tmp/formatting && test ! -s /tmp/formatting
       - run: mise run test

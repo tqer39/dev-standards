@@ -222,3 +222,36 @@ func TestAutomationCheckoutKeepsCanonicalLineEndings(t *testing.T) {
 		}
 	}
 }
+
+// A saved output snapshot alone cannot detect edits to the canonical input.
+func TestAutomationCIRechecksCanonicalInstructions(t *testing.T) {
+	tree := fixture(t)
+	write(t, tree.Root, "AGENTS.md", "# Local instructions\n\nOriginal guidance.\n")
+	req := Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md", Automation: true, InstructionLanguage: "en"}
+	plan, err := tree.Plan(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	workflow := read(t, tree.Root, ".github/workflows/dev-standards.yml")
+	command := "go run github.com/tqer39/dev-standards/cmd/dev-standards@v" + bundle.Version + " check --repo ."
+	if !strings.Contains(workflow, command) || strings.Index(workflow, command) > strings.Index(workflow, "mise run lint") {
+		t.Fatal("CI lacks pinned canonical-source verification before project checks")
+	}
+	if strings.Contains(workflow, "STANDARDS_VERSION") {
+		t.Fatal("unexpanded CLI version")
+	}
+	if !strings.Contains(read(t, tree.Root, "AGENTS.md"), "mise run standards:feedback") {
+		t.Fatal("feedback relies on a global executable")
+	}
+	tasks := read(t, tree.Root, ".standards/tasks.standards.toml")
+	if !strings.Contains(tasks, `run = "./.standards/cache/dev-standards feedback"`) || !strings.Contains(tasks, `run_windows = '.\.standards\cache\dev-standards.exe feedback'`) {
+		t.Fatal("feedback launcher missing")
+	}
+	write(t, tree.Root, ".standards/agents.local.md", "# Changed canonical instructions\n")
+	if _, err := tree.Check(); err == nil {
+		t.Fatal("canonical instruction drift was accepted")
+	}
+}
