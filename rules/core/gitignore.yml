@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "id": "CORE-GITIGNORE",
-  "revision": 1,
+  "revision": 2,
   "status": "active",
-  "title": "gitignore.io の入力を保存する",
-  "rationale": "共通の開発手順を成果物と検査で再現する。",
+  "title": "gitignore.io API で .gitignore を整備する",
+  "rationale": "言語と OS に対応する除外設定を gitignore.io API から取得し、採用入力の保存と固有設定の保持によって再現可能にする。",
   "appliesTo": {
     "profiles": [
       "base"
@@ -29,8 +29,11 @@
   "remediation": {
     "mode": "automatic",
     "handler": "managed-file",
-    "instructions": "計画を確認して適用し、check と verify で確認する。"
+    "instructions": "gitignore.io API から取得して保存した採用入力と .standards/gitignore.local を使って再生成する。変更計画を確認して適用し、check と verify、および再適用時の差分ゼロを確認する。"
   },
   "guidance": "guidance/core/gitignore.md",
-  "references": []
+  "references": [
+    "https://docs.gitignore.io/use/api",
+    "https://docs.gitignore.io/use/command-line"
+  ]
 }

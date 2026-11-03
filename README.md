@@ -12,7 +12,7 @@ Go はリポジトリのルートに module が１つある構成、Python/uv �
 macOS、Linux、Windows で同じ CLI と mise タスクを使用します。
 
 - EditorConfig の配置と固有設定の保持
-- gitignore.io から取得済みの入力を保存した、オフラインでの再生成
+- gitignore.io API から取得済みの入力を保存した、オフラインでの `.gitignore` 再生成
 - mise によるツールの固定と bootstrap、lint、format、test、build の入口
 - 要件、候補、選定理由を含む言語選定記録の構造検証
 - 変更計画、ロック、適用済み状態、衝突検出、通常の書き込み失敗時の復元
@@ -271,6 +271,8 @@ dev-standards check
 | `.standards/state.json` | 管理ファイルの前回出力とモード |
 
 共通定義は実行ファイルに埋め込みます。通常の検証と再適用はネットワークから最新版を取得しません。
+`.gitignore` の共通入力は gitignore.io API で整備し、固有設定を保持して再生成します。
+取得・更新と検証の手順は [gitignore のルール](guidance/core/gitignore.md) を参照してください。
 ロックと異なる版・入力を使う場合も、暗黙に更新せず停止します。
 この初期版はソースからビルドして使用し、リリース配布物の取得・検証は後続の実装で扱います。
 
