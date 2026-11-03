@@ -167,6 +167,17 @@
           "type": "integer",
           "minimum": 1
         },
+        "pushBranches": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "maxLength": 255,
+            "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_.-]*(/[a-zA-Z0-9_][a-zA-Z0-9_.-]*)*$"
+          }
+        },
         "nodePreflight": {
           "type": "string",
           "pattern": "^[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)*\\.mjs$"

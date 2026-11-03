@@ -870,6 +870,8 @@ func TestProjectCommitUsesPinnedEnvironmentAndKeepsHooks(t *testing.T) {
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet", "-b", "main")
 	put(t, dir, "mise.toml", "[env]\nMAINTENANCE_HOOK_PROBE = 'ready'\n")
+	const subject = "🔧 chore: 保守確認"
+	put(t, dir, ".standards/mise.project.toml", "[vars]\nstandards_commit_message = '"+subject+"'\n")
 	put(t, dir, "probe.txt", "initial\n")
 	runGit(t, dir, "add", ".")
 	runGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial")
@@ -881,15 +883,67 @@ func TestProjectCommitUsesPinnedEnvironmentAndKeepsHooks(t *testing.T) {
 	if err := os.WriteFile(hook, []byte("#!/bin/sh\n[ \"$MAINTENANCE_HOOK_PROBE\" = ready ] || exit 1\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
+	messageHook := "#!/bin/sh\n[ \"$(head -n 1 \"$1\")\" = '" + subject + "' ] || exit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, ".git/hooks/commit-msg"), []byte(messageHook), 0700); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("MAINTENANCE_HOOK_PROBE", "")
 	if err := commit(context.Background(), Exec{}, dir, "must fail"); err == nil {
 		t.Fatal("hook did not reject unprepared environment")
 	}
-	if err := commitUsing(context.Background(), Exec{}, dir, "prepared commit", true); err != nil {
+	if err := commitUsing(context.Background(), Exec{}, dir, "prepared commit", true); err == nil {
+		t.Fatal("message hook did not reject the default subject")
+	}
+	message, err := projectMessage(dir, "prepared commit")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := runGit(t, dir, "log", "-1", "--format=%s"); got != "prepared commit" {
+	if err := commitUsing(context.Background(), Exec{}, dir, message, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := runGit(t, dir, "log", "-1", "--format=%s"); got != subject {
 		t.Fatal(got)
+	}
+}
+
+func TestProjectMessageDeclaration(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, want string
+		present, invalid  bool
+	}{
+		{"missing", "", "fallback", false, false},
+		{"default", "[vars]\nother = true\n", "fallback", true, false},
+		{"declared", "[vars]\nother = 3\nstandards_commit_message = '🔧 chore: 保守確認'\n", "🔧 chore: 保守確認", true, false},
+		{"empty", "[vars]\nstandards_commit_message = ''\n", "", true, true},
+		{"blank", "[vars]\nstandards_commit_message = '  '\n", "", true, true},
+		{"wrong type", "[vars]\nstandards_commit_message = false\n", "", true, true},
+		{"multiline", "[vars]\nstandards_commit_message = \"\"\"one\ntwo\"\"\"\n", "", true, true},
+		{"nul", "[vars]\nstandards_commit_message = \"one\\u0000two\"\n", "", true, true},
+		{"too long", "[vars]\nstandards_commit_message = '" + strings.Repeat("x", 257) + "'\n", "", true, true},
+		{"invalid TOML", "[vars\n", "", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			runGit(t, dir, "init", "--quiet", "-b", "main")
+			if tc.present {
+				put(t, dir, ".standards/mise.project.toml", tc.input)
+			}
+			got, err := projectMessage(dir, "fallback")
+			if (err != nil) != tc.invalid || got != tc.want {
+				t.Fatalf("got %q, error %v", got, err)
+			}
+		})
+	}
+}
+
+func TestInvalidProjectMessageStopsBeforePublication(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet", "-b", "main")
+	put(t, dir, ".standards/mise.project.toml", "[vars]\nstandards_commit_message = false\n")
+	probe := &fakeCodex{}
+	_, err := publish(context.Background(), probe, dir, Entry{Role: "project", Remote: "https://github.com/example/project"}, "base", Default(Entry{}))
+	if err == nil || len(probe.Calls) != 0 {
+		t.Fatalf("invalid subject reached publication: %v calls=%v", err, probe.Calls)
 	}
 }
 
@@ -898,6 +952,11 @@ type pendingPublishProbe struct {
 	apiCalls        int
 	merged          string
 	crashAfterMerge bool
+	readiness       []string
+	readinessCalls  int
+	mergeCalls      int
+	workflowPath    string
+	createdTitle    string
 }
 
 func (p *pendingPublishProbe) Run(ctx context.Context, dir, exe string, args []string, input string) (string, error) {
@@ -914,16 +973,35 @@ func (p *pendingPublishProbe) Run(ctx context.Context, dir, exe string, args []s
 		if p.apiCalls > 1 {
 			conclusion = "failure"
 		}
-		return fmt.Sprintf(`{"workflow_runs":[{"head_sha":%q,"path":".github/workflows/ci.yml","status":"completed","conclusion":%q}]}`, sha, conclusion), nil
+		path := p.workflowPath
+		if path == "" {
+			path = ".github/workflows/ci.yml"
+		}
+		return fmt.Sprintf(`{"workflow_runs":[{"head_sha":%q,"path":%q,"status":"completed","conclusion":%q}]}`, sha, path, conclusion), nil
 	}
 	switch strings.Join(args[:2], " ") {
 	case "pr list":
 		return "[]", nil
 	case "pr create":
+		for i, arg := range args {
+			if arg == "--title" && i+1 < len(args) {
+				p.createdTitle = args[i+1]
+			}
+		}
 		return "https://github.com/example/source/pull/1", nil
 	case "pr merge":
+		p.mergeCalls++
 		return "", nil
 	case "pr view":
+		if args[len(args)-1] == "headRefOid,mergeStateStatus,statusCheckRollup" {
+			state := "CLEAN"
+			if p.readinessCalls < len(p.readiness) {
+				state = p.readiness[p.readinessCalls]
+			}
+			p.readinessCalls++
+			head, err := (Exec{}).Run(ctx, dir, "git", []string{"rev-parse", "HEAD"}, "")
+			return fmt.Sprintf(`{"headRefOid":%q,"mergeStateStatus":%q}`, strings.TrimSpace(head), state), err
+		}
 		return p.merged, nil
 	}
 	return "", fmt.Errorf("unexpected GitHub operation: %v", args)
@@ -942,6 +1020,92 @@ func TestPublishRetainsMergedCommitWhenPostMergeCIFails(t *testing.T) {
 	sha, err := publish(context.Background(), probe, source, entry, base, Default(entry))
 	if err == nil || sha != probe.merged || probe.apiCalls != 2 {
 		t.Fatalf("post-merge checkpoint lost: %s %v (%d calls)", sha, err, probe.apiCalls)
+	}
+}
+
+func TestProjectPullRequestUsesDeclaredMessage(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	bare(t, remote)
+	project := filepath.Join(root, "project")
+	const subject = "🔧 chore: 共通ルール更新"
+	put(t, project, ".standards/mise.project.toml", "[vars]\nstandards_commit_message = '"+subject+"'\n")
+	repository(t, project, remote)
+	base := runGit(t, project, "rev-parse", "HEAD")
+	upstream := "https://github.com/example/project"
+	probe := &pendingPublishProbe{fakeCodex: fakeCodex{RemoteAlias: map[string]string{upstream: remote}}, merged: strings.Repeat("f", 40), workflowPath: ".github/workflows/dev-standards.yml"}
+	entry := Entry{Path: project, Remote: upstream, Branch: "main", Role: "project"}
+	sha, err := publish(context.Background(), probe, project, entry, base, Default(entry))
+	if err == nil || sha != probe.merged || probe.createdTitle != subject || probe.mergeCalls != 1 {
+		t.Fatalf("declared subject not used: sha=%s err=%v title=%q merges=%d", sha, err, probe.createdTitle, probe.mergeCalls)
+	}
+}
+
+func TestPublishWaitsForBranchRequirementsAfterCommonCISucceeds(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	bare(t, remote)
+	source := filepath.Join(root, "source")
+	put(t, source, "file.txt", "content\n")
+	repository(t, source, remote)
+	base := runGit(t, source, "rev-parse", "HEAD")
+	upstream := "https://github.com/example/source"
+	probe := &pendingPublishProbe{fakeCodex: fakeCodex{RemoteAlias: map[string]string{upstream: remote}}, merged: strings.Repeat("e", 40), readiness: []string{"BLOCKED", "CLEAN"}}
+	entry := Entry{Path: source, Remote: upstream, Branch: "main", Role: "source"}
+	sha, err := publish(context.Background(), probe, source, entry, base, Default(entry))
+	// The existing probe deliberately fails post-merge CI. Merge must still have
+	// waited for GitHub to confirm all branch requirements on the same head.
+	if err == nil || sha != probe.merged || probe.readinessCalls != 2 || probe.mergeCalls != 1 {
+		t.Fatalf("branch requirements were not awaited: sha=%s err=%v polls=%d merges=%d", sha, err, probe.readinessCalls, probe.mergeCalls)
+	}
+}
+
+type mergeStateStub struct{ head, state string }
+
+func (s mergeStateStub) Run(context.Context, string, string, []string, string) (string, error) {
+	if s.state == "LEGACY_FAILURE" {
+		return fmt.Sprintf(`{"headRefOid":%q,"mergeStateStatus":"BLOCKED","statusCheckRollup":[{"context":"legacy required CI","state":"FAILURE"}]}`, s.head), nil
+	}
+	if s.state == "FAILURE" || s.state == "CANCELLED" {
+		return fmt.Sprintf(`{"headRefOid":%q,"mergeStateStatus":"BLOCKED","statusCheckRollup":[{"name":"other required CI","conclusion":%q}]}`, s.head, s.state), nil
+	}
+	return fmt.Sprintf(`{"headRefOid":%q,"mergeStateStatus":%q}`, s.head, s.state), nil
+}
+
+func TestMergeReadinessRequiresSameHeadAndAllBranchRequirements(t *testing.T) {
+	for _, tc := range []struct {
+		name, head, state string
+		cancel, success   bool
+	}{
+		{"ready", "candidate", "CLEAN", false, true},
+		{"head replaced", "other", "CLEAN", false, false},
+		{"conflict", "candidate", "DIRTY", false, false},
+		{"draft", "candidate", "DRAFT", false, false},
+		{"failed checks", "candidate", "FAILURE", false, false},
+		{"legacy failed check", "candidate", "LEGACY_FAILURE", false, false},
+		{"cancelled checks", "candidate", "CANCELLED", false, false},
+		{"pending optional checks", "candidate", "UNSTABLE", true, false},
+		{"missing required check", "candidate", "BLOCKED", true, false},
+		{"unknown within budget", "candidate", "UNKNOWN", true, false},
+		{"malformed state", "candidate", "", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancel {
+				cancel()
+			}
+			err := waitMergeReady(ctx, mergeStateStub{tc.head, tc.state}, t.TempDir(), "owner/repo", 1, "candidate")
+			if (err == nil) != tc.success {
+				t.Fatalf("readiness result: %v", err)
+			}
+			if tc.cancel && !strings.Contains(err.Error(), "context canceled") {
+				t.Fatalf("budget cancellation ignored: %v", err)
+			}
+			if tc.state == "LEGACY_FAILURE" && !strings.Contains(err.Error(), "legacy required CI") {
+				t.Fatalf("failed status context was not identified: %v", err)
+			}
+		})
 	}
 }
 
