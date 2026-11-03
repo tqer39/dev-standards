@@ -123,6 +123,14 @@ run = """{% set lock = read_json(path='.standards/lock.json') %}{% if lock.versi
 
 func componentWorkflow(m Manifest, project string) string {
 	workflow := strings.ReplaceAll(projectWorkflow, "STANDARDS_VERSION", bundle.Version)
+	if len(m.CI.PushBranches) > 0 {
+		branches := make([]string, len(m.CI.PushBranches))
+		for i, branch := range m.CI.PushBranches {
+			branches[i] = strings.TrimSpace(string(JSON(branch)))
+		}
+		events := "on:\n  push:\n    branches: [" + strings.Join(branches, ", ") + "]\n  pull_request:\n  workflow_dispatch:"
+		workflow = strings.Replace(workflow, "on: [push, pull_request]", events, 1)
+	}
 	if m.CI.NodePreflight != "" {
 		workflow = strings.Replace(workflow, "      - uses: jdx/mise-action@", "      - run: node "+m.CI.NodePreflight+"\n      - uses: jdx/mise-action@", 1)
 	}

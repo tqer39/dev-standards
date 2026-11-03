@@ -40,6 +40,13 @@ func validateManifest(m Manifest) error {
 	if err := validateCompanions(m); err != nil {
 		return err
 	}
+	for _, branch := range m.CI.PushBranches {
+		for _, part := range strings.Split(branch, "/") {
+			if strings.Contains(part, "..") || strings.HasSuffix(part, ".") || strings.HasSuffix(part, ".lock") {
+				return fmt.Errorf("ci.pushBranches must contain literal branch names")
+			}
+		}
+	}
 	c := m.Components[0]
 	if _, err := bundle.ResolveProfile(c.Profile); err != nil {
 		return err

@@ -33,10 +33,11 @@ type Manifest struct {
 		Rollout    string `json:"rollout"`
 	} `json:"update"`
 	CI struct {
-		NodePreflight   string `json:"nodePreflight,omitempty"`
-		PRBudgetSeconds int    `json:"prBudgetSeconds"`
-		MinimumSamples  int    `json:"minimumSamples"`
-		BreachWindows   int    `json:"breachWindows"`
+		NodePreflight   string   `json:"nodePreflight,omitempty"`
+		PushBranches    []string `json:"pushBranches,omitempty"`
+		PRBudgetSeconds int      `json:"prBudgetSeconds"`
+		MinimumSamples  int      `json:"minimumSamples"`
+		BreachWindows   int      `json:"breachWindows"`
 	} `json:"ci"`
 }
 type Component struct {
