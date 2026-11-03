@@ -18,15 +18,16 @@ import (
 )
 
 type fakeCodex struct {
-	exec           Exec
-	Changes        int
-	Reviews        int
-	Deny           bool
-	Calls          [][]string
-	Inputs         []string
-	SkipValidation bool
-	RemoteAlias    map[string]string
-	CIResponse     string
+	exec                     Exec
+	Changes                  int
+	Reviews                  int
+	Deny                     bool
+	Calls                    [][]string
+	Inputs                   []string
+	SkipValidation           bool
+	PanicProjectVerification bool
+	RemoteAlias              map[string]string
+	CIResponse               string
 }
 
 func (f *fakeCodex) Run(ctx context.Context, dir, exe string, args []string, input string) (string, error) {
@@ -45,6 +46,9 @@ func (f *fakeCodex) Run(ctx context.Context, dir, exe string, args []string, inp
 	}
 	if exe == "mise" && f.SkipValidation {
 		return "passed", nil
+	}
+	if f.PanicProjectVerification && len(args) > 0 && args[0] == "verify" && strings.HasPrefix(filepath.Base(dir), "project-") {
+		panic("simulated project interruption")
 	}
 	if exe != "codex" {
 		return f.exec.Run(ctx, dir, exe, args, input)
@@ -711,5 +715,343 @@ func TestPrepareShowsAppliedVersionOnlyAfterCheck(t *testing.T) {
 	text, err = Prepare(context.Background(), dir)
 	if err == nil || strings.Contains(text, "適用版:") {
 		t.Fatalf("failed check reported a validated version: %s %v", text, err)
+	}
+}
+
+type preparationProbe struct {
+	Exec
+	calls         []string
+	failBootstrap bool
+	prepared      bool
+}
+
+func (p *preparationProbe) Run(ctx context.Context, dir, exe string, args []string, input string) (string, error) {
+	if exe == "mise" {
+		p.calls = append(p.calls, strings.Join(args, " "))
+		if strings.Join(args, " ") == "run bootstrap" {
+			if p.failBootstrap {
+				return "", fmt.Errorf("bootstrap failed")
+			}
+			p.prepared = true
+		}
+		return "", nil
+	}
+	if filepath.Base(exe) == "fixture-cli" {
+		p.calls = append(p.calls, args[0])
+		if args[0] == "verify" && !p.prepared {
+			return "", fmt.Errorf("cold dependencies were not prepared")
+		}
+		return "", nil
+	}
+	return p.Exec.Run(ctx, dir, exe, args, input)
+}
+func TestProjectPreparesFreshCloneAndStopsOnBootstrapFailure(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprint(fail), func(t *testing.T) {
+			root := t.TempDir()
+			project := filepath.Join(root, "project")
+			remote := filepath.Join(root, "project.git")
+			bare(t, remote)
+			put(t, project, "go.mod", "module example.com/probe\n\ngo 1.27.3\n")
+			put(t, project, "main.go", "package main\nfunc main() {}\n")
+			put(t, project, "decision.md", "# 言語\n\n## 要件\n\n複数 OS の CLI。\n\n## 候補\n\nGo と Python。\n\n## 選定理由\n\nGo の単体配布。\n")
+			runGit(t, project, "init", "--quiet", "-b", "main")
+			tr, err := engine.Open(project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := tr.Plan(engine.Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md", Automation: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = tr.Apply(plan); err != nil {
+				t.Fatal(err)
+			}
+			tr.Close()
+			repository(t, project, remote)
+			before := runGit(t, remote, "rev-parse", "HEAD")
+			probe := &preparationProbe{failBootstrap: fail}
+			entry := Entry{Path: project, Remote: remote, Branch: "main", Role: "project"}
+			put(t, root, "fixture-cli", "fixture executable")
+			binary := filepath.Join(root, "fixture-cli")
+			result, err := (Maintainer{}).project(context.Background(), probe, entry, Default(Entry{}), binary, root, 0)
+			calls := strings.Join(probe.calls, ";")
+			if fail {
+				if err == nil || strings.Contains(calls, "verify") {
+					t.Fatalf("failure accepted or verification ran: %v %s", err, calls)
+				}
+			} else {
+				if err != nil || result.Status != "unchanged" || strings.Index(calls, "run bootstrap") > strings.Index(calls, "verify") {
+					t.Fatalf("preparation order: %v %+v %s", err, result, calls)
+				}
+			}
+			if got := runGit(t, remote, "rev-parse", "HEAD"); got != before {
+				t.Fatal("remote changed")
+			}
+		})
+	}
+}
+
+func TestResumeRolloutKeepsValidatedSourceUntilProjectsFinish(t *testing.T) {
+	for _, tc := range []struct{ sameSource, pending bool }{{true, false}, {false, false}, {true, true}, {false, true}} {
+		sameSource, pending := tc.sameSource, tc.pending
+		t.Run(fmt.Sprintf("%t-%t", sameSource, pending), func(t *testing.T) {
+			root := t.TempDir()
+			source := filepath.Join(root, "source")
+			sourceRemote := filepath.Join(root, "source.git")
+			bare(t, sourceRemote)
+			current, err := filepath.Abs("../..")
+			if err != nil {
+				t.Fatal(err)
+			}
+			copySource(t, current, source)
+			repository(t, source, sourceRemote)
+			base := runGit(t, source, "rev-parse", "HEAD")
+			previous := base
+			if !sameSource {
+				previous = strings.Repeat("a", 40)
+			}
+			project := filepath.Join(root, "project")
+			remote := filepath.Join(root, "project.git")
+			bare(t, remote)
+			put(t, project, "go.mod", "module example.com/resume\n\ngo 1.27.3\n")
+			put(t, project, "main.go", "package main\n\nfunc main() {}\n")
+			put(t, project, "decision.md", "# 言語\n\n## 要件\n\n複数 OS の CLI。\n\n## 候補\n\nGo と Python。\n\n## 選定理由\n\nGo の単体配布。\n")
+			runGit(t, project, "init", "--quiet", "-b", "main")
+			tr, err := engine.Open(project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := tr.Plan(engine.Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md", Automation: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = tr.Apply(plan); err != nil {
+				t.Fatal(err)
+			}
+			tr.Close()
+			repository(t, project, remote)
+			c := Default(Entry{Path: source, Remote: sourceRemote, Branch: "main", Role: "source"})
+			c.Projects = []Entry{{Path: project, Remote: remote, Branch: "main", Role: "project"}}
+			state := filepath.Join(root, "state")
+			previousLearning := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+			previousLedger := Ledger{LearnedAt: previousLearning, Outcomes: []Outcome{{Repository: sourceRemote, Status: "unchanged", Commit: previous}, {Repository: remote, Status: "failed", Detail: "bootstrap interrupted"}}}
+			if pending {
+				previousLedger.PendingSource = previous
+				previousLedger.Outcomes = []Outcome{{Repository: sourceRemote, Status: "failed", Detail: "post-merge CI pending"}}
+			}
+			put(t, state, "latest.json", string(mustJSON(t, previousLedger)))
+			fake := &fakeCodex{Changes: 1, SkipValidation: true}
+			report, err := (Maintainer{Commands: fake}).Run(context.Background(), c, state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			learned := false
+			for _, input := range fake.Inputs {
+				learned = learned || strings.Contains(input, "共通開発ルールを自律保守してください")
+			}
+			if sameSource && !report.LearnedAt.Equal(previousLearning) {
+				t.Fatal("resume postponed the overdue weekly review")
+			}
+			if learned == sameSource {
+				t.Fatalf("learning on retry: sameSource=%t learned=%t", sameSource, learned)
+			}
+			if len(report.Outcomes) != 2 || report.Outcomes[1].Status != "unchanged" {
+				t.Fatalf("rollout not finished: %+v", report)
+			}
+		})
+	}
+}
+
+func TestProjectCommitUsesPinnedEnvironmentAndKeepsHooks(t *testing.T) {
+	if _, err := exec.LookPath("mise"); err != nil {
+		t.Skip("mise required")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet", "-b", "main")
+	put(t, dir, "mise.toml", "[env]\nMAINTENANCE_HOOK_PROBE = 'ready'\n")
+	put(t, dir, "probe.txt", "initial\n")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial")
+	put(t, dir, "probe.txt", "updated\n")
+	if _, err := (Exec{}).Run(context.Background(), dir, "mise", []string{"trust", dir}, ""); err != nil {
+		t.Fatal(err)
+	}
+	hook := filepath.Join(dir, ".git/hooks/pre-commit")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\n[ \"$MAINTENANCE_HOOK_PROBE\" = ready ] || exit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MAINTENANCE_HOOK_PROBE", "")
+	if err := commit(context.Background(), Exec{}, dir, "must fail"); err == nil {
+		t.Fatal("hook did not reject unprepared environment")
+	}
+	if err := commitUsing(context.Background(), Exec{}, dir, "prepared commit", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := runGit(t, dir, "log", "-1", "--format=%s"); got != "prepared commit" {
+		t.Fatal(got)
+	}
+}
+
+type pendingPublishProbe struct {
+	fakeCodex
+	apiCalls        int
+	merged          string
+	crashAfterMerge bool
+}
+
+func (p *pendingPublishProbe) Run(ctx context.Context, dir, exe string, args []string, input string) (string, error) {
+	if exe != "gh" {
+		return p.fakeCodex.Run(ctx, dir, exe, args, input)
+	}
+	if args[0] == "api" {
+		p.apiCalls++
+		if p.apiCalls == 2 && p.crashAfterMerge {
+			panic("simulated hard termination during post-merge CI")
+		}
+		sha := strings.Split(strings.Split(args[1], "head_sha=")[1], "&")[0]
+		conclusion := "success"
+		if p.apiCalls > 1 {
+			conclusion = "failure"
+		}
+		return fmt.Sprintf(`{"workflow_runs":[{"head_sha":%q,"path":".github/workflows/ci.yml","status":"completed","conclusion":%q}]}`, sha, conclusion), nil
+	}
+	switch strings.Join(args[:2], " ") {
+	case "pr list":
+		return "[]", nil
+	case "pr create":
+		return "https://github.com/example/source/pull/1", nil
+	case "pr merge":
+		return "", nil
+	case "pr view":
+		return p.merged, nil
+	}
+	return "", fmt.Errorf("unexpected GitHub operation: %v", args)
+}
+func TestPublishRetainsMergedCommitWhenPostMergeCIFails(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	bare(t, remote)
+	source := filepath.Join(root, "source")
+	put(t, source, "file.txt", "content\n")
+	repository(t, source, remote)
+	base := runGit(t, source, "rev-parse", "HEAD")
+	upstream := "https://github.com/example/source"
+	probe := &pendingPublishProbe{fakeCodex: fakeCodex{RemoteAlias: map[string]string{upstream: remote}}, merged: strings.Repeat("b", 40)}
+	entry := Entry{Path: source, Remote: upstream, Branch: "main", Role: "source"}
+	sha, err := publish(context.Background(), probe, source, entry, base, Default(entry))
+	if err == nil || sha != probe.merged || probe.apiCalls != 2 {
+		t.Fatalf("post-merge checkpoint lost: %s %v (%d calls)", sha, err, probe.apiCalls)
+	}
+}
+
+func TestSourceCheckpointSurvivesTerminationBeforePublishReturns(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	bare(t, remote)
+	source := filepath.Join(root, "source")
+	put(t, source, "file.txt", "content\n")
+	repository(t, source, remote)
+	upstream := "https://github.com/example/source"
+	base := runGit(t, source, "rev-parse", "HEAD")
+	probe := &pendingPublishProbe{fakeCodex: fakeCodex{RemoteAlias: map[string]string{upstream: remote}}, merged: strings.Repeat("c", 40), crashAfterMerge: true}
+	entry := Entry{Path: source, Remote: upstream, Branch: "main", Role: "source"}
+	state := filepath.Join(root, "state")
+	if err := os.Mkdir(state, 0700); err != nil {
+		t.Fatal(err)
+	}
+	crashed := false
+	func() {
+		defer func() { crashed = recover() != nil }()
+		_, _ = publish(context.Background(), probe, source, entry, base, Default(entry), func(sha string) error { return saveLedger(state, Ledger{PendingSource: sha}) })
+	}()
+	if !crashed {
+		t.Fatal("post-merge interruption was not exercised")
+	}
+	data, err := os.ReadFile(filepath.Join(state, "latest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recorded Ledger
+	if err = json.Unmarshal(data, &recorded); err != nil {
+		t.Fatal(err)
+	}
+	if recorded.PendingSource != probe.merged {
+		t.Fatalf("checkpoint was lost before finish: %+v", recorded)
+	}
+}
+
+func TestCheckpointFailureStopsBeforePostMergeCI(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	bare(t, remote)
+	source := filepath.Join(root, "source")
+	put(t, source, "file.txt", "content\n")
+	repository(t, source, remote)
+	upstream := "https://github.com/example/source"
+	base := runGit(t, source, "rev-parse", "HEAD")
+	probe := &pendingPublishProbe{fakeCodex: fakeCodex{RemoteAlias: map[string]string{upstream: remote}}, merged: strings.Repeat("d", 40)}
+	entry := Entry{Path: source, Remote: upstream, Branch: "main", Role: "source"}
+	sha, err := publish(context.Background(), probe, source, entry, base, Default(entry), func(string) error { return fmt.Errorf("checkpoint disk unavailable") })
+	if err == nil || !strings.Contains(err.Error(), "checkpoint disk unavailable") || sha != probe.merged || probe.apiCalls != 1 {
+		t.Fatalf("checkpoint failure ignored: %s %v calls=%d", sha, err, probe.apiCalls)
+	}
+}
+
+func TestUnchangedSourceIsCheckpointedBeforeProjectVerification(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	sourceRemote := filepath.Join(root, "source.git")
+	bare(t, sourceRemote)
+	current, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	copySource(t, current, source)
+	repository(t, source, sourceRemote)
+	base := runGit(t, source, "rev-parse", "HEAD")
+	project := filepath.Join(root, "project")
+	remote := filepath.Join(root, "project.git")
+	bare(t, remote)
+	put(t, project, "go.mod", "module example.com/checkpoint\n\ngo 1.27.3\n")
+	put(t, project, "main.go", "package main\n\nfunc main() {}\n")
+	put(t, project, "decision.md", "# 言語\n\n## 要件\n\n複数 OS の CLI。\n\n## 候補\n\nGo と Python。\n\n## 選定理由\n\nGo の単体配布。\n")
+	runGit(t, project, "init", "--quiet", "-b", "main")
+	tr, err := engine.Open(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := tr.Plan(engine.Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md", Automation: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = tr.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	tr.Close()
+	repository(t, project, remote)
+	c := Default(Entry{Path: source, Remote: sourceRemote, Branch: "main", Role: "source"})
+	c.Projects = []Entry{{Path: project, Remote: remote, Branch: "main", Role: "project"}}
+	state := filepath.Join(root, "state")
+	put(t, state, "latest.json", string(mustJSON(t, Ledger{LearnedAt: time.Now()})))
+	fake := &fakeCodex{Changes: 1, SkipValidation: true, PanicProjectVerification: true}
+	crashed := false
+	func() {
+		defer func() { crashed = recover() != nil }()
+		_, _ = (Maintainer{Commands: fake}).Run(context.Background(), c, state)
+	}()
+	if !crashed {
+		t.Fatal("project interruption was not exercised")
+	}
+	data, err := os.ReadFile(filepath.Join(state, "latest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recorded Ledger
+	if err = json.Unmarshal(data, &recorded); err != nil {
+		t.Fatal(err)
+	}
+	if recorded.PendingSource != base || len(recorded.Outcomes) != 1 || recorded.Outcomes[0].Status != "unchanged" {
+		t.Fatalf("source progress lost: %+v", recorded)
 	}
 }

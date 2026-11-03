@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func publish(ctx context.Context, x Executor, dir string, e Entry, base string, c Config) (string, error) {
+func publish(ctx context.Context, x Executor, dir string, e Entry, base string, c Config, checkpoints ...func(string) error) (string, error) {
 	candidate, err := git(ctx, x, dir, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err
@@ -89,8 +89,13 @@ func publish(ctx context.Context, x Executor, dir string, e Entry, base string, 
 	if len(merged) != 40 {
 		return "", fmt.Errorf("merge was not confirmed")
 	}
+	for _, checkpoint := range checkpoints {
+		if err := checkpoint(merged); err != nil {
+			return merged, err
+		}
+	}
 	if err = waitCI(ctx, x, dir, repo, merged, workflow); err != nil {
-		return "", err
+		return merged, err
 	}
 	return merged, nil
 }
