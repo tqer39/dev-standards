@@ -116,6 +116,7 @@ func waitMergeReady(ctx context.Context, x Executor, dir, repo string, number in
 			State  string `json:"mergeStateStatus"`
 			Checks []struct {
 				Name       string `json:"name"`
+				Context    string `json:"context"`
 				State      string `json:"state"`
 				Conclusion string `json:"conclusion"`
 			} `json:"statusCheckRollup"`
@@ -130,7 +131,11 @@ func waitMergeReady(ctx context.Context, x Executor, dir, repo string, number in
 			for _, result := range []string{check.State, check.Conclusion} {
 				switch result {
 				case "FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STALE", "STARTUP_FAILURE":
-					return fmt.Errorf("pull request check did not succeed: %s (%s)", check.Name, result)
+					name := check.Name
+					if name == "" {
+						name = check.Context
+					}
+					return fmt.Errorf("pull request check did not succeed: %s (%s)", name, result)
 				}
 			}
 		}

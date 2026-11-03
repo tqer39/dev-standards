@@ -980,6 +980,9 @@ func TestPublishWaitsForBranchRequirementsAfterCommonCISucceeds(t *testing.T) {
 type mergeStateStub struct{ head, state string }
 
 func (s mergeStateStub) Run(context.Context, string, string, []string, string) (string, error) {
+	if s.state == "LEGACY_FAILURE" {
+		return fmt.Sprintf(`{"headRefOid":%q,"mergeStateStatus":"BLOCKED","statusCheckRollup":[{"context":"legacy required CI","state":"FAILURE"}]}`, s.head), nil
+	}
 	if s.state == "FAILURE" || s.state == "CANCELLED" {
 		return fmt.Sprintf(`{"headRefOid":%q,"mergeStateStatus":"BLOCKED","statusCheckRollup":[{"name":"other required CI","conclusion":%q}]}`, s.head, s.state), nil
 	}
@@ -996,6 +999,7 @@ func TestMergeReadinessRequiresSameHeadAndAllBranchRequirements(t *testing.T) {
 		{"conflict", "candidate", "DIRTY", false, false},
 		{"draft", "candidate", "DRAFT", false, false},
 		{"failed checks", "candidate", "FAILURE", false, false},
+		{"legacy failed check", "candidate", "LEGACY_FAILURE", false, false},
 		{"cancelled checks", "candidate", "CANCELLED", false, false},
 		{"pending optional checks", "candidate", "UNSTABLE", true, false},
 		{"missing required check", "candidate", "BLOCKED", true, false},
@@ -1014,6 +1018,9 @@ func TestMergeReadinessRequiresSameHeadAndAllBranchRequirements(t *testing.T) {
 			}
 			if tc.cancel && !strings.Contains(err.Error(), "context canceled") {
 				t.Fatalf("budget cancellation ignored: %v", err)
+			}
+			if tc.state == "LEGACY_FAILURE" && !strings.Contains(err.Error(), "legacy required CI") {
+				t.Fatalf("failed status context was not identified: %v", err)
 			}
 		})
 	}
