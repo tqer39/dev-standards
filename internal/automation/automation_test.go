@@ -870,6 +870,8 @@ func TestProjectCommitUsesPinnedEnvironmentAndKeepsHooks(t *testing.T) {
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet", "-b", "main")
 	put(t, dir, "mise.toml", "[env]\nMAINTENANCE_HOOK_PROBE = 'ready'\n")
+	const subject = "🔧 chore: 保守確認"
+	put(t, dir, ".standards/mise.project.toml", "[vars]\nstandards_commit_message = '"+subject+"'\n")
 	put(t, dir, "probe.txt", "initial\n")
 	runGit(t, dir, "add", ".")
 	runGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial")
@@ -881,15 +883,67 @@ func TestProjectCommitUsesPinnedEnvironmentAndKeepsHooks(t *testing.T) {
 	if err := os.WriteFile(hook, []byte("#!/bin/sh\n[ \"$MAINTENANCE_HOOK_PROBE\" = ready ] || exit 1\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
+	messageHook := "#!/bin/sh\n[ \"$(head -n 1 \"$1\")\" = '" + subject + "' ] || exit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, ".git/hooks/commit-msg"), []byte(messageHook), 0700); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("MAINTENANCE_HOOK_PROBE", "")
 	if err := commit(context.Background(), Exec{}, dir, "must fail"); err == nil {
 		t.Fatal("hook did not reject unprepared environment")
 	}
-	if err := commitUsing(context.Background(), Exec{}, dir, "prepared commit", true); err != nil {
+	if err := commitUsing(context.Background(), Exec{}, dir, "prepared commit", true); err == nil {
+		t.Fatal("message hook did not reject the default subject")
+	}
+	message, err := projectMessage(dir, "prepared commit")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := runGit(t, dir, "log", "-1", "--format=%s"); got != "prepared commit" {
+	if err := commitUsing(context.Background(), Exec{}, dir, message, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := runGit(t, dir, "log", "-1", "--format=%s"); got != subject {
 		t.Fatal(got)
+	}
+}
+
+func TestProjectMessageDeclaration(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, want string
+		present, invalid  bool
+	}{
+		{"missing", "", "fallback", false, false},
+		{"default", "[vars]\nother = true\n", "fallback", true, false},
+		{"declared", "[vars]\nother = 3\nstandards_commit_message = '🔧 chore: 保守確認'\n", "🔧 chore: 保守確認", true, false},
+		{"empty", "[vars]\nstandards_commit_message = ''\n", "", true, true},
+		{"blank", "[vars]\nstandards_commit_message = '  '\n", "", true, true},
+		{"wrong type", "[vars]\nstandards_commit_message = false\n", "", true, true},
+		{"multiline", "[vars]\nstandards_commit_message = \"\"\"one\ntwo\"\"\"\n", "", true, true},
+		{"nul", "[vars]\nstandards_commit_message = \"one\\u0000two\"\n", "", true, true},
+		{"too long", "[vars]\nstandards_commit_message = '" + strings.Repeat("x", 257) + "'\n", "", true, true},
+		{"invalid TOML", "[vars\n", "", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			runGit(t, dir, "init", "--quiet", "-b", "main")
+			if tc.present {
+				put(t, dir, ".standards/mise.project.toml", tc.input)
+			}
+			got, err := projectMessage(dir, "fallback")
+			if (err != nil) != tc.invalid || got != tc.want {
+				t.Fatalf("got %q, error %v", got, err)
+			}
+		})
+	}
+}
+
+func TestInvalidProjectMessageStopsBeforePublication(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet", "-b", "main")
+	put(t, dir, ".standards/mise.project.toml", "[vars]\nstandards_commit_message = false\n")
+	probe := &fakeCodex{}
+	_, err := publish(context.Background(), probe, dir, Entry{Role: "project", Remote: "https://github.com/example/project"}, "base", Default(Entry{}))
+	if err == nil || len(probe.Calls) != 0 {
+		t.Fatalf("invalid subject reached publication: %v calls=%v", err, probe.Calls)
 	}
 }
 
@@ -901,6 +955,8 @@ type pendingPublishProbe struct {
 	readiness       []string
 	readinessCalls  int
 	mergeCalls      int
+	workflowPath    string
+	createdTitle    string
 }
 
 func (p *pendingPublishProbe) Run(ctx context.Context, dir, exe string, args []string, input string) (string, error) {
@@ -917,12 +973,21 @@ func (p *pendingPublishProbe) Run(ctx context.Context, dir, exe string, args []s
 		if p.apiCalls > 1 {
 			conclusion = "failure"
 		}
-		return fmt.Sprintf(`{"workflow_runs":[{"head_sha":%q,"path":".github/workflows/ci.yml","status":"completed","conclusion":%q}]}`, sha, conclusion), nil
+		path := p.workflowPath
+		if path == "" {
+			path = ".github/workflows/ci.yml"
+		}
+		return fmt.Sprintf(`{"workflow_runs":[{"head_sha":%q,"path":%q,"status":"completed","conclusion":%q}]}`, sha, path, conclusion), nil
 	}
 	switch strings.Join(args[:2], " ") {
 	case "pr list":
 		return "[]", nil
 	case "pr create":
+		for i, arg := range args {
+			if arg == "--title" && i+1 < len(args) {
+				p.createdTitle = args[i+1]
+			}
+		}
 		return "https://github.com/example/source/pull/1", nil
 	case "pr merge":
 		p.mergeCalls++
@@ -955,6 +1020,24 @@ func TestPublishRetainsMergedCommitWhenPostMergeCIFails(t *testing.T) {
 	sha, err := publish(context.Background(), probe, source, entry, base, Default(entry))
 	if err == nil || sha != probe.merged || probe.apiCalls != 2 {
 		t.Fatalf("post-merge checkpoint lost: %s %v (%d calls)", sha, err, probe.apiCalls)
+	}
+}
+
+func TestProjectPullRequestUsesDeclaredMessage(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	bare(t, remote)
+	project := filepath.Join(root, "project")
+	const subject = "🔧 chore: 共通ルール更新"
+	put(t, project, ".standards/mise.project.toml", "[vars]\nstandards_commit_message = '"+subject+"'\n")
+	repository(t, project, remote)
+	base := runGit(t, project, "rev-parse", "HEAD")
+	upstream := "https://github.com/example/project"
+	probe := &pendingPublishProbe{fakeCodex: fakeCodex{RemoteAlias: map[string]string{upstream: remote}}, merged: strings.Repeat("f", 40), workflowPath: ".github/workflows/dev-standards.yml"}
+	entry := Entry{Path: project, Remote: upstream, Branch: "main", Role: "project"}
+	sha, err := publish(context.Background(), probe, project, entry, base, Default(entry))
+	if err == nil || sha != probe.merged || probe.createdTitle != subject || probe.mergeCalls != 1 {
+		t.Fatalf("declared subject not used: sha=%s err=%v title=%q merges=%d", sha, err, probe.createdTitle, probe.mergeCalls)
 	}
 }
 

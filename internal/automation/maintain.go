@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 	bundle "github.com/tqer39/dev-standards"
@@ -343,6 +344,10 @@ func (m Maintainer) project(ctx context.Context, x Executor, e Entry, c Config, 
 	if err = guardProject(dir, changed, c, cfg); err != nil {
 		return o, err
 	}
+	message, err := projectMessage(dir, "chore: 共通開発ルールを自動適用")
+	if err != nil {
+		return o, err
+	}
 	review, err := Agent(ctx, x, dir, "直前の固定ジョブで構成検査、静的解析、整形、テスト、ビルドは成功しています。コマンドの再実行や設定変更をせず差分の読み取りと判断だけを行ってください。共通設定の更新を読み取り専用でレビューしてください。git diff と既存の固有設定を比較し、設定の消失、検査回避、業務コード変更がないことを確認してください。言語選定の理由と現行構成の整合も LLM として判断してください。通常保守に人間の指示・必須レビュー・承認を再導入する変更は拒否してください。問題があれば approved=false にしてください。", true)
 	if err != nil {
 		return o, err
@@ -350,7 +355,7 @@ func (m Maintainer) project(ctx context.Context, x Executor, e Entry, c Config, 
 	if !review.Approved {
 		return o, fmt.Errorf("project review rejected: %s", review.Reason)
 	}
-	if err = commitUsing(ctx, x, dir, "chore: 共通開発ルールを自動適用", true); err != nil {
+	if err = commitUsing(ctx, x, dir, message, true); err != nil {
 		return o, err
 	}
 	sha, err := publish(ctx, x, dir, e, base, c)
@@ -543,6 +548,36 @@ func bumpVersion(dir string) error {
 	updated := re.ReplaceAllString(string(b), fmt.Sprintf(`const Version = "%s.%s.%d"`, m[1], m[2], patch+1))
 	return os.WriteFile(p, []byte(updated), 0644)
 }
+func projectMessage(dir, fallback string) (string, error) {
+	tree, err := engine.Open(dir)
+	if err != nil {
+		return "", err
+	}
+	defer tree.Close()
+	input, err := tree.Read(".standards/mise.project.toml")
+	if err != nil {
+		return "", err
+	}
+	if !input.Exists {
+		return fallback, nil
+	}
+	var config struct {
+		Vars map[string]any `toml:"vars"`
+	}
+	if _, err := toml.Decode(input.Content, &config); err != nil {
+		return "", err
+	}
+	value, exists := config.Vars["standards_commit_message"]
+	if !exists {
+		return fallback, nil
+	}
+	message, ok := value.(string)
+	if !ok || strings.TrimSpace(message) == "" || utf8.RuneCountInString(message) > 256 || strings.ContainsAny(message, "\r\n\x00") {
+		return "", fmt.Errorf("vars.standards_commit_message must be a nonempty single-line string of at most 256 characters")
+	}
+	return message, nil
+}
+
 func commit(ctx context.Context, x Executor, dir, message string) error {
 	return commitUsing(ctx, x, dir, message, false)
 }
