@@ -100,6 +100,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		}
 	}
 	previousDeliveryPaths := automationPathsFor(m)
+	appliedVersion := m.Standard.Version
 	if upgrading {
 		if !nonDowngrade(m.Standard.Version, bundle.Version) {
 			return nil, fmt.Errorf("automatic downgrades are forbidden")
@@ -324,7 +325,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	}
 	desired[".editorconfig"] = file(bundle.Read("templates/base/editorconfig.txt") + "\n# リポジトリ固有の設定\n" + localEditor)
 	desired[".gitignore"] = file(snapshot + "\n# dev-standards\n/.standards/cache/\n/.standards/plans/\n/.dev-standards-apply.lock\n/bin/\n.env\n.env.*\n!.env.example\n\n# リポジトリ固有の設定\n" + ignoreLocal)
-	desired[".gitattributes"] = file(normalized(attributesLocal) + "\n# dev-standards: deterministic checkout\n*.go text eol=lf\ngo.mod text eol=lf\ngo.sum text eol=lf\n/.editorconfig text eol=lf\n/mise.toml text eol=lf\n/.gitattributes text eol=lf\n/AGENTS.md text eol=lf\n/.codex/hooks.json text eol=lf\n/.github/workflows/dev-standards.yml text eol=lf\n/.gitignore -text whitespace=-blank-at-eol\n/.standards/** text eol=lf\n/.standards/gitignore.local -text whitespace=-blank-at-eol\n/.standards/vendor/gitignore/*.txt -text whitespace=-blank-at-eol\n/docs/decisions/0001-language.md text eol=lf\n")
+	desired[".gitattributes"] = file(normalized(attributesLocal) + "\n# dev-standards: deterministic checkout\n*.go text eol=lf\ngo.mod text eol=lf\ngo.sum text eol=lf\n/.editorconfig text eol=lf\n/mise.toml text eol=lf\n/.gitattributes text eol=lf\n/AGENTS.md text eol=lf\n/.codex/hooks.json text eol=lf\n/.github/workflows/dev-standards.yml text eol=lf\n/.github/workflows/dev-standards-version-lag.yml text eol=lf\n/.gitignore -text whitespace=-blank-at-eol\n/.standards/** text eol=lf\n/.standards/gitignore.local -text whitespace=-blank-at-eol\n/.standards/vendor/gitignore/*.txt -text whitespace=-blank-at-eol\n/docs/decisions/0001-language.md text eol=lf\n")
 	if component.Profile == "python-uv" {
 		desired[".editorconfig"] = file(bundle.Read("templates/base/editorconfig.txt") + "\n[*.py]\nindent_size = 4\n\n# リポジトリ固有の設定\n" + localEditor)
 		attrs := desired[".gitattributes"]
@@ -380,6 +381,11 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		requiredOwnership = append(requiredOwnership, previousDeliveryPaths...)
 		for _, name := range requiredOwnership {
 			if _, ok := state.Files[name]; !ok {
+				// Earlier versions never owned this file; the upgrade adds it.
+				// The digest can't tell them apart: it ignores CLI-only releases.
+				if name == versionLagWorkflowPath && appliedVersion != bundle.Version {
+					continue
+				}
 				return nil, fmt.Errorf("state is missing required ownership: %s", name)
 			}
 		}
@@ -602,7 +608,7 @@ func validateIgnore(content string, required ...string) error {
 		}
 		return string(out), err
 	}
-	tracked := "AGENTS.md\n.codex/hooks.json\n.github/workflows/dev-standards.yml\n.standards/rules.md\n.standards/agents.local.md\n.standards/hooks.local.json\n.gitattributes\n.standards/gitattributes.local\n.standards/repository.yml\n.standards/lock.json\n.standards/state.json\n.standards/exceptions.yml\n.standards/gitignore.local\n.standards/editorconfig.local\n.standards/mise.project.toml\n.standards/tasks.project.toml\n.standards/tasks.standards.toml\n" + vendorPath + "\n.editorconfig\n.gitignore\nmise.toml\ngo.mod\ngo.sum\n" + decisionTarget + "\n"
+	tracked := "AGENTS.md\n.codex/hooks.json\n.github/workflows/dev-standards.yml\n.github/workflows/dev-standards-version-lag.yml\n.standards/rules.md\n.standards/agents.local.md\n.standards/hooks.local.json\n.gitattributes\n.standards/gitattributes.local\n.standards/repository.yml\n.standards/lock.json\n.standards/state.json\n.standards/exceptions.yml\n.standards/gitignore.local\n.standards/editorconfig.local\n.standards/mise.project.toml\n.standards/tasks.project.toml\n.standards/tasks.standards.toml\n" + vendorPath + "\n.editorconfig\n.gitignore\nmise.toml\ngo.mod\ngo.sum\n" + decisionTarget + "\n"
 	tracked += strings.Join(required, "\n") + "\n"
 	ignored, err := check(tracked)
 	if err != nil {
