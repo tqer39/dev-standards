@@ -713,6 +713,8 @@ func TestProjectGuardAllowsVersionLagWorkflow(t *testing.T) {
 	if err := guardProject(dir, []string{".github/workflows/dev-standards-version-lag.yml"}, Default(Entry{}), cfg); err != nil {
 		t.Fatalf("rollout would stop on the managed workflow: %v", err)
 	}
+	// A missing file would be rejected by the budget check before the allowlist.
+	put(t, dir, ".github/workflows/other.yml", "name: other\n")
 	if err := guardProject(dir, []string{".github/workflows/other.yml"}, Default(Entry{}), cfg); err == nil {
 		t.Fatal("unmanaged workflow accepted")
 	}

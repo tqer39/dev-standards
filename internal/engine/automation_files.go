@@ -245,10 +245,11 @@ jobs:
           # The oldest one decides, so newer tags cannot reset the clock.
           oldest = unapplied[0]
           git('fetch', '--quiet', '--depth=1', source, 'refs/tags/v' + oldest)
+          # Tags are lightweight and record no time of their own, so the tagged commit stands in.
           age_days = (time.time() - int(git('log', '-1', '--format=%ct', 'FETCH_HEAD'))) / 86400
           if age_days >= grace_days:
-              fail(f'dev-standards {applied_text} is applied, but {oldest} was published {age_days:.1f} days ago. Scheduled maintenance may have stopped; run dev-standards maintain on the maintenance host.')
-          print(f'dev-standards {oldest} was published {age_days:.1f} days ago, within the {grace_days}-day grace period')
+              fail(f'dev-standards {applied_text} is applied, but the commit of {oldest} is {age_days:.1f} days old. The rollout may have failed or stopped; check dev-standards maintain on the maintenance host.')
+          print(f'the commit of dev-standards {oldest} is {age_days:.1f} days old, within the {grace_days}-day grace period')
           PYTHON
 `
 

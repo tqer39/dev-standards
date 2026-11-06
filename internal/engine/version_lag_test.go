@@ -181,6 +181,66 @@ func TestCurrentStateMustOwnVersionLagWorkflow(t *testing.T) {
 	}
 }
 
+// With the file still present, the unowned-file check also rejects the state,
+// so only this case reaches the ownership check itself.
+func TestCurrentStateMissingVersionLagWorkflowAndOwnership(t *testing.T) {
+	tree := adoptWithAutomation(t)
+	var state State
+	if err := json.Unmarshal([]byte(read(t, tree.Root, ".standards/state.json")), &state); err != nil {
+		t.Fatal(err)
+	}
+	delete(state.Files, versionLagWorkflowPath)
+	write(t, tree.Root, ".standards/state.json", string(JSON(state)))
+	if err := os.Remove(filepath.Join(tree.Root, versionLagWorkflowPath)); err != nil {
+		t.Fatal(err)
+	}
+	commit(t, tree.Root)
+	if _, err := tree.Plan(Request{Mode: "reapply"}); err == nil || !strings.Contains(err.Error(), "state is missing required ownership: "+versionLagWorkflowPath) {
+		t.Fatalf("missing ownership accepted: %v", err)
+	}
+}
+
+// The lock records the applied version; a stale manifest must not pass as a migration.
+func TestStaleManifestDoesNotExemptVersionLagOwnership(t *testing.T) {
+	tree := adoptWithAutomation(t)
+	var state State
+	if err := json.Unmarshal([]byte(read(t, tree.Root, ".standards/state.json")), &state); err != nil {
+		t.Fatal(err)
+	}
+	delete(state.Files, versionLagWorkflowPath)
+	write(t, tree.Root, ".standards/state.json", string(JSON(state)))
+	var manifest Manifest
+	if err := json.Unmarshal([]byte(read(t, tree.Root, ".standards/repository.yml")), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Standard.Version = "0.4.7"
+	write(t, tree.Root, ".standards/repository.yml", string(JSON(manifest)))
+	if err := os.Remove(filepath.Join(tree.Root, versionLagWorkflowPath)); err != nil {
+		t.Fatal(err)
+	}
+	commit(t, tree.Root)
+	if _, err := tree.Plan(Request{Mode: "upgrade", Automation: true}); err == nil || !strings.Contains(err.Error(), "state is missing required ownership: "+versionLagWorkflowPath) {
+		t.Fatalf("stale manifest exempted the ownership check: %v", err)
+	}
+}
+
+func TestIgnoreRulesMayExcludeVersionLagWorkflowWithoutAutomation(t *testing.T) {
+	tree := fixture(t)
+	write(t, tree.Root, ".standards/gitignore.local", ".github/workflows/*\n!.github/workflows/dev-standards.yml\n")
+	if _, err := tree.Plan(Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md"}); err != nil {
+		t.Fatalf("rejected an exclusion of a file this setup never generates: %v", err)
+	}
+}
+
+func TestIgnoreRulesMustNotExcludeVersionLagWorkflowWithAutomation(t *testing.T) {
+	tree := fixture(t)
+	write(t, tree.Root, ".standards/gitignore.local", ".github/workflows/*\n!.github/workflows/dev-standards.yml\n")
+	_, err := tree.Plan(Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md", Automation: true})
+	if err == nil || !strings.Contains(err.Error(), versionLagWorkflowPath) {
+		t.Fatalf("generated workflow would stay untracked: %v", err)
+	}
+}
+
 func TestVersionLagWorkflowRequiresAutomation(t *testing.T) {
 	tree := fixture(t)
 	adopt(t, tree)

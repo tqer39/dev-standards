@@ -100,7 +100,6 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		}
 	}
 	previousDeliveryPaths := automationPathsFor(m)
-	appliedVersion := m.Standard.Version
 	if upgrading {
 		if !nonDowngrade(m.Standard.Version, bundle.Version) {
 			return nil, fmt.Errorf("automatic downgrades are forbidden")
@@ -383,7 +382,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 			if _, ok := state.Files[name]; !ok {
 				// Earlier versions never owned this file; the upgrade adds it.
 				// The digest can't tell them apart: it ignores CLI-only releases.
-				if name == versionLagWorkflowPath && appliedVersion != bundle.Version {
+				if name == versionLagWorkflowPath && previousLock.Version != bundle.Version {
 					continue
 				}
 				return nil, fmt.Errorf("state is missing required ownership: %s", name)
@@ -608,7 +607,7 @@ func validateIgnore(content string, required ...string) error {
 		}
 		return string(out), err
 	}
-	tracked := "AGENTS.md\n.codex/hooks.json\n.github/workflows/dev-standards.yml\n.github/workflows/dev-standards-version-lag.yml\n.standards/rules.md\n.standards/agents.local.md\n.standards/hooks.local.json\n.gitattributes\n.standards/gitattributes.local\n.standards/repository.yml\n.standards/lock.json\n.standards/state.json\n.standards/exceptions.yml\n.standards/gitignore.local\n.standards/editorconfig.local\n.standards/mise.project.toml\n.standards/tasks.project.toml\n.standards/tasks.standards.toml\n" + vendorPath + "\n.editorconfig\n.gitignore\nmise.toml\ngo.mod\ngo.sum\n" + decisionTarget + "\n"
+	tracked := "AGENTS.md\n.codex/hooks.json\n.github/workflows/dev-standards.yml\n.standards/rules.md\n.standards/agents.local.md\n.standards/hooks.local.json\n.gitattributes\n.standards/gitattributes.local\n.standards/repository.yml\n.standards/lock.json\n.standards/state.json\n.standards/exceptions.yml\n.standards/gitignore.local\n.standards/editorconfig.local\n.standards/mise.project.toml\n.standards/tasks.project.toml\n.standards/tasks.standards.toml\n" + vendorPath + "\n.editorconfig\n.gitignore\nmise.toml\ngo.mod\ngo.sum\n" + decisionTarget + "\n"
 	tracked += strings.Join(required, "\n") + "\n"
 	ignored, err := check(tracked)
 	if err != nil {
