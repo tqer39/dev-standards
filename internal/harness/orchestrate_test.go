@@ -17,6 +17,7 @@ type fakeAgents struct {
 	sent         []string
 	started      int
 	reviewed     int
+	closed       int
 	prompts      []string
 }
 
@@ -28,6 +29,7 @@ func (f *fakeAgents) SendImplementer(_ context.Context, _ *Record, text string) 
 	f.sent = append(f.sent, text)
 	return nil
 }
+func (f *fakeAgents) CloseImplementer(context.Context, *Record)               { f.closed++ }
 func (f *fakeAgents) ImplementerAlive(context.Context, *Record) (bool, error) { return true, nil }
 func (f *fakeAgents) WaitImplementer(context.Context, *Record, string, time.Duration) (ImplOutcome, Result, error) {
 	outcome := ImplDone
@@ -611,5 +613,22 @@ func TestChangedFedThreadIsFedAgain(t *testing.T) {
 	}
 	if len(rec.FedThreads) != 1 || !strings.Contains(agents.prompts[0], "別の問題") {
 		t.Fatalf("fed=%+v prompt=%s", rec.FedThreads, agents.prompts[0])
+	}
+}
+
+func TestImplementerIsClosedOnlyAfterMerge(t *testing.T) {
+	agents := &fakeAgents{reviews: [][]byte{[]byte(passVerdict)}}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, &fakeForge{mergeResult: "merge"}, fakeScanner{})
+	if err := orchestrator.Run(context.Background(), rec, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if agents.closed != 1 {
+		t.Fatalf("closed=%d", agents.closed)
+	}
+	// 停止したときは、人間が確認できるよう端末を残す。
+	stopped := &fakeAgents{}
+	orchestrator, rec = newOrchestrator(t, stopped, &fakeTree{}, &fakeForge{}, fakeScanner{leak: true})
+	if err := orchestrator.Run(context.Background(), rec, nil, true); !errors.Is(err, ErrStopped) || stopped.closed != 0 {
+		t.Fatalf("err=%v closed=%d", err, stopped.closed)
 	}
 }

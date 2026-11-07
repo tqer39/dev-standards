@@ -25,6 +25,7 @@ type Agents interface {
 	StartImplementer(context.Context, *Record, string, string) error
 	SendImplementer(context.Context, *Record, string) error
 	ImplementerAlive(context.Context, *Record) (bool, error)
+	CloseImplementer(context.Context, *Record)
 	WaitImplementer(context.Context, *Record, string, time.Duration) (ImplOutcome, Result, error)
 	Review(context.Context, *Record, string, string, time.Duration) (ReviewOutcome, []byte, error)
 }
@@ -422,6 +423,7 @@ func (o *Orchestrator) merge(ctx context.Context, rec *Record, config RepoConfig
 	if err := o.Store.Save(rec); err != nil {
 		return err
 	}
+	o.Agents.CloseImplementer(ctx, rec)
 	return o.checkMain(ctx, rec, config)
 }
 

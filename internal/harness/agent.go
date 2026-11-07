@@ -108,6 +108,12 @@ func (h *Herdr) SendImplementer(ctx context.Context, rec *Record, text string) e
 	return err
 }
 
+// CloseImplementer は完了後に端末を閉じる。失敗しても結果には影響しない。
+func (h *Herdr) CloseImplementer(ctx context.Context, rec *Record) {
+	_, _ = h.Run.Run(ctx, Cmd{Name: h.HC, Args: []string{"kill", implName(rec)}})
+	_, _ = h.Run.Run(ctx, Cmd{Name: h.HC, Args: []string{"rm", implName(rec)}})
+}
+
 // ImplementerAlive は実装担当の端末が生きているかを返す。
 func (h *Herdr) ImplementerAlive(ctx context.Context, rec *Record) (bool, error) {
 	out, err := h.Run.Run(ctx, Cmd{Name: h.HC, Args: []string{"get", implName(rec), "--json"}})

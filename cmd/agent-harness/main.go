@@ -23,6 +23,9 @@ import (
 	"github.com/tqer39/dev-standards/internal/harness"
 )
 
+// gitleaksVersion は mise.toml の版と揃える。
+const gitleaksVersion = "gitleaks@8.30.1"
+
 type runProfile struct{ Agent, Model, Effort, Reviewer string }
 
 func profile(agent, model, effort string) (runProfile, error) {
@@ -160,7 +163,7 @@ func build(repo, codexAuth string) (*harness.Orchestrator, error) {
 		return nil, err
 	}
 	paths := map[string]string{}
-	for _, name := range []string{"hc", "codex", "claude", "op", "gh", "git", "gitleaks"} {
+	for _, name := range []string{"hc", "codex", "claude", "op", "gh", "git", "mise"} {
 		path, err := resolve(name)
 		if err != nil {
 			return nil, err
@@ -188,18 +191,22 @@ func build(repo, codexAuth string) (*harness.Orchestrator, error) {
 		return nil, err
 	}
 	return &harness.Orchestrator{
-		Store:  harness.Store{Root: root},
-		Agents: &harness.Herdr{Run: runner, HC: paths["hc"], Codex: paths["codex"], Claude: paths["claude"], Poll: 5 * time.Second, CodexHome: codexHome},
-		Tree:   tree,
-		Forge:  &harness.GitHub{Run: runner, Tokens: tokens, Repo: repo, Poll: 15 * time.Second},
-		Scanner: harness.Gitleaks{
-			Run: runner, Bin: paths["gitleaks"], Dir: root,
-		},
+		Store:         harness.Store{Root: root},
+		Agents:        &harness.Herdr{Run: runner, HC: paths["hc"], Codex: paths["codex"], Claude: paths["claude"], Poll: 5 * time.Second, CodexHome: codexHome},
+		Tree:          tree,
+		Forge:         &harness.GitHub{Run: runner, Tokens: tokens, Repo: repo, Poll: 15 * time.Second},
+		Scanner:       scanner(runner, paths["mise"], root),
 		Config:        harness.LoadRepoConfig,
 		RoundLimit:    30 * time.Minute,
 		MergeLimit:    30 * time.Minute,
 		ExternalGrace: harness.ExternalReviewGrace,
 	}, nil
+}
+
+// scanner は版を固定して gitleaks を起動する。
+// mise の shim はプロジェクトの外で版を決められず失敗するので、直接は使わない。
+func scanner(runner harness.Runner, mise, dir string) harness.Gitleaks {
+	return harness.Gitleaks{Run: runner, Bin: mise, Prefix: []string{"exec", gitleaksVersion, "--", "gitleaks"}, Dir: dir}
 }
 
 func runCommand(args []string, out io.Writer) error {
@@ -367,9 +374,21 @@ func doctor(args []string, out io.Writer) error {
 		}
 		fmt.Fprintf(out, "PASS %s\n", name)
 	}
-	for _, name := range []string{"hc", "codex", "claude", "op", "gh", "git", "gitleaks"} {
+	for _, name := range []string{"hc", "codex", "claude", "op", "gh", "git", "mise"} {
 		_, err := resolve(name)
 		check(name, err)
+	}
+	root, rootErr := stateRoot()
+	check("状態ディレクトリ", rootErr)
+	if rootErr == nil {
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			check("状態ディレクトリの作成", err)
+		}
+		mise, miseErr := resolve("mise")
+		if miseErr == nil {
+			miseErr = harness.VerifyScanner(context.Background(), scanner(harness.OSRunner{}, mise, root))
+		}
+		check("秘密情報スキャンの検出", miseErr)
 	}
 	check("Codex の権限プロファイル", installProfile())
 	codexHome, err := codexHomeFor(*codexAuth)
