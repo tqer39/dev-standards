@@ -117,8 +117,8 @@ func (f *fakeForge) OpenPullRequest(_ context.Context, head string) (int, error)
 	return f.open[head], nil
 }
 
-func (f *fakeForge) PullRequestMerge(context.Context, int) (string, string, error) {
-	return f.prState, f.prSHA, nil
+func (f *fakeForge) PullRequestMerge(context.Context, int) (PullRequestState, error) {
+	return PullRequestState{State: f.prState, MergeSHA: f.prSHA, AutoMerge: len(f.armed) > 0, NeedsHuman: len(f.needsHuman) > 0}, nil
 }
 
 func (f *fakeForge) UnresolvedThreads(context.Context, int) ([]ReviewThread, error) {
@@ -558,6 +558,32 @@ func TestMergeTimeoutIsTrackedByReconcile(t *testing.T) {
 	}
 	stored, _ = orchestrator.Store.Load("r1")
 	if stored.Status != StatusCompleted || stored.MergeSHA != "late" {
+		t.Fatalf("stored=%+v", stored)
+	}
+}
+
+func TestUnarmedPullRequestIsHandedToHuman(t *testing.T) {
+	// merge_armed を保存した直後に止まると、auto-merge のない PR が残る。
+	forge := &fakeForge{prState: "OPEN"}
+	orchestrator, rec := newOrchestrator(t, &fakeAgents{}, &fakeTree{}, forge, fakeScanner{})
+	rec.Status, rec.PR = StatusMergeArmed, 101
+	if err := orchestrator.Store.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := orchestrator.Reconcile(context.Background(), "o/n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(forge.needsHuman) != 1 || len(forge.armed) != 0 {
+		t.Fatalf("needsHuman=%v armed=%v", forge.needsHuman, forge.armed)
+	}
+	forge.prState, forge.prSHA = "MERGED", "manual"
+	if err := orchestrator.Reconcile(context.Background(), "o/n"); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := orchestrator.Store.Load("r1")
+	if stored.Status != StatusCompleted || stored.MergeSHA != "manual" {
 		t.Fatalf("stored=%+v", stored)
 	}
 }

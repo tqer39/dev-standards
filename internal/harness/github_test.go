@@ -103,8 +103,13 @@ func TestOpenPullRequestFindsByHead(t *testing.T) {
 
 func TestPullRequestMergeReadsStateWithoutHeadCheck(t *testing.T) {
 	forge, _ := forgeWith(map[string]response{"gh pr": {out: `{"state":"MERGED","mergeCommit":{"oid":"def"}}`}})
-	state, sha, err := forge.PullRequestMerge(context.Background(), 17)
-	if err != nil || state != "MERGED" || sha != "def" {
-		t.Fatalf("state=%q sha=%q err=%v", state, sha, err)
+	state, err := forge.PullRequestMerge(context.Background(), 17)
+	if err != nil || state.State != "MERGED" || state.MergeSHA != "def" || state.AutoMerge || state.NeedsHuman {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+	forge, _ = forgeWith(map[string]response{"gh pr": {out: `{"state":"OPEN","mergeCommit":null,"autoMergeRequest":{"mergeMethod":"SQUASH"},"labels":[{"name":"needs-human"}]}`}})
+	state, err = forge.PullRequestMerge(context.Background(), 17)
+	if err != nil || !state.AutoMerge || !state.NeedsHuman {
+		t.Fatalf("state=%+v err=%v", state, err)
 	}
 }
