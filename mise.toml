@@ -5,7 +5,7 @@ npm.package_manager = "npm"
 [tools]
 go = "1.27.3"
 node = "24.21.0"
-"npm:markdownlint-cli2" = "0.23.3"
+"npm:markdownlint-cli2" = "0.24.0"
 
 [tasks.bootstrap]
 run = "go mod download"
