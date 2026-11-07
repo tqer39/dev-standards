@@ -51,6 +51,11 @@ mise run security:check
 mise run catalog:check
 ```
 
+保守処理の受け入れテスト `TestFleetUpdatesSourceAndProjectWithoutHumanApproval` は、
+複製したリポジトリで検証一式を再実行するため時間がかかります。
+`-short` の指定時はこのテストだけを省略するため、`mise run test:race` では実行しません。
+CI では Windows の PR に限り `GOFLAGS=-short` で省略し、`main` への push では全 OS で実行します。
+
 ビルドした CLI は `bin/` にあります。
 Windows の実行ファイル名は `dev-standards.exe`、他の OS では `dev-standards` です。
 利用先では、この実行ファイルが PATH から見つかる状態にしてください。

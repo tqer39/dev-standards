@@ -23,7 +23,8 @@ run = "go run ./cmd/dev-standards format-check"
 run = "go test -timeout=20m ./..."
 
 [tasks."test:race"]
-run = "go test -race ./..."
+# 複製先で検証一式を再実行する受け入れテストは、check の実行に任せる。
+run = "go test -race -short ./..."
 
 [tasks.build]
 run = "go build -o bin/ ./cmd/dev-standards"

@@ -191,6 +191,10 @@ func TestCopiedSourceInitializesIndependentRepository(t *testing.T) {
 }
 
 func TestFleetUpdatesSourceAndProjectWithoutHumanApproval(t *testing.T) {
+	// 複製先で検証一式を再実行するため、全テストに近い時間を 2 回以上使う。
+	if testing.Short() {
+		t.Skip("the fleet source acceptance suite re-runs the whole validation in a copy")
+	}
 	if os.Getenv("DEV_STANDARDS_TEST_REENTRANT") == "1" {
 		t.Skip("the fleet source acceptance suite is already running in the outer process")
 	}
