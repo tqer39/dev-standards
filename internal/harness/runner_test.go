@@ -49,3 +49,14 @@ func TestBaseEnvKeepsPath(t *testing.T) {
 		t.Fatalf("out=%q err=%v", out, err)
 	}
 }
+
+func TestOSRunnerCombinesStderrOnRequest(t *testing.T) {
+	out, err := OSRunner{}.Run(context.Background(), Cmd{Name: "sh", Args: []string{"-c", "echo err >&2"}, CombineOutput: true})
+	if err != nil || strings.TrimSpace(out) != "err" {
+		t.Fatalf("out=%q err=%v", out, err)
+	}
+	out, err = OSRunner{}.Run(context.Background(), Cmd{Name: "sh", Args: []string{"-c", "echo err >&2"}})
+	if err != nil || out != "" {
+		t.Fatalf("stderr must stay separate by default: out=%q err=%v", out, err)
+	}
+}

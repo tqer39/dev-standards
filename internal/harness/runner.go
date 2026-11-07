@@ -21,6 +21,8 @@ type Cmd struct {
 	Env     []string
 	Stdin   string
 	Secrets []string
+	// CombineOutput は標準エラーも出力に含める。状態を標準エラーに出すコマンドに使う。
+	CombineOutput bool
 }
 
 type Runner interface {
@@ -59,6 +61,9 @@ func (OSRunner) Run(ctx context.Context, c Cmd) (string, error) {
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err == nil {
+		if c.CombineOutput {
+			return stdout.String() + stderr.String(), nil
+		}
 		return stdout.String(), nil
 	}
 	code := -1

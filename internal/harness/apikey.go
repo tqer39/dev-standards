@@ -54,7 +54,7 @@ func SetupAPIKey(ctx context.Context, run Runner, secrets Secrets, codex, home s
 
 // APIKeyLoggedIn は専用ホームが API キーでログインしていることを確認する。
 func APIKeyLoggedIn(ctx context.Context, run Runner, codex, home string) error {
-	out, err := run.Run(ctx, Cmd{Name: codex, Args: []string{"login", "status"}, Env: []string{"CODEX_HOME=" + home}})
+	out, err := run.Run(ctx, Cmd{Name: codex, Args: []string{"login", "status"}, Env: []string{"CODEX_HOME=" + home}, CombineOutput: true})
 	var runErr *RunError
 	if errors.As(err, &runErr) {
 		out += runErr.Stderr

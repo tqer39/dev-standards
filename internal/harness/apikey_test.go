@@ -54,8 +54,8 @@ func TestAPIKeyLoggedIn(t *testing.T) {
 	if err := APIKeyLoggedIn(context.Background(), runner, "codex", "/h"); err != nil {
 		t.Fatal(err)
 	}
-	if runner.calls[0].Env[0] != "CODEX_HOME=/h" {
-		t.Fatalf("env=%v", runner.calls[0].Env)
+	if runner.calls[0].Env[0] != "CODEX_HOME=/h" || !runner.calls[0].CombineOutput {
+		t.Fatalf("call=%+v", runner.calls[0])
 	}
 	runner = &scriptRunner{responses: map[string]response{"codex login": {out: "Logged in using ChatGPT\n"}}}
 	if err := APIKeyLoggedIn(context.Background(), runner, "codex", "/h"); err == nil {
