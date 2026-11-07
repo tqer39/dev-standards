@@ -23,8 +23,8 @@ import (
 	"github.com/tqer39/dev-standards/internal/harness"
 )
 
-// gitleaksVersion は mise.toml の版と揃える。
-const gitleaksVersion = "gitleaks@8.30.1"
+// betterleaksTool は mise で起動する版を固定する。agent-telemetry の版と揃える。
+const betterleaksTool = "aqua:betterleaks/betterleaks@1.9.0"
 
 type runProfile struct{ Agent, Model, Effort, Reviewer string }
 
@@ -228,10 +228,10 @@ func build(repo, codexAuth string) (*harness.Orchestrator, error) {
 	}, nil
 }
 
-// scanner は版を固定して gitleaks を起動する。
+// scanner は版を固定して betterleaks を起動する。
 // mise の shim はプロジェクトの外で版を決められず失敗するので、直接は使わない。
-func scanner(runner harness.Runner, mise, dir string) harness.Gitleaks {
-	return harness.Gitleaks{Run: runner, Bin: mise, Prefix: []string{"exec", gitleaksVersion, "--", "gitleaks"}, Dir: dir}
+func scanner(runner harness.Runner, mise, dir string) harness.Betterleaks {
+	return harness.Betterleaks{Run: runner, Bin: mise, Prefix: []string{"exec", betterleaksTool, "--", "betterleaks"}, Dir: dir}
 }
 
 func runCommand(args []string, out io.Writer) error {

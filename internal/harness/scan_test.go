@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-func TestGitleaksReportsLeakOnlyOnDedicatedExitCode(t *testing.T) {
-	runner := &scriptRunner{responses: map[string]response{"mise": {err: &RunError{Name: "mise", Code: gitleaksLeakExit}}}}
-	leak, err := Gitleaks{Run: runner, Bin: "mise", Prefix: []string{"exec", "gitleaks@1", "--", "gitleaks"}, Dir: "/tmp"}.Scan(context.Background(), []byte("+x"))
+func TestBetterleaksReportsLeakOnlyOnDedicatedExitCode(t *testing.T) {
+	runner := &scriptRunner{responses: map[string]response{"mise": {err: &RunError{Name: "mise", Code: betterleaksLeakExit}}}}
+	leak, err := Betterleaks{Run: runner, Bin: "mise", Prefix: []string{"exec", "betterleaks@1", "--", "betterleaks"}, Dir: "/tmp"}.Scan(context.Background(), []byte("+x"))
 	if err != nil || !leak {
 		t.Fatalf("leak=%v err=%v", leak, err)
 	}
@@ -18,24 +18,24 @@ func TestGitleaksReportsLeakOnlyOnDedicatedExitCode(t *testing.T) {
 	if call.Dir != "/tmp" || call.Stdin != "+x" {
 		t.Fatalf("call=%+v", call)
 	}
-	if !strings.HasPrefix(strings.Join(call.Args, " "), "exec gitleaks@1 -- gitleaks stdin") {
+	if !strings.HasPrefix(strings.Join(call.Args, " "), "exec betterleaks@1 -- betterleaks stdin") {
 		t.Fatalf("args=%v", call.Args)
 	}
 }
 
-func TestGitleaksTreatsToolFailureAsError(t *testing.T) {
-	// 起動エラーは 1 で終わることがある。秘密情報の検出と区別する。
+func TestBetterleaksTreatsToolFailureAsError(t *testing.T) {
+	// 検出専用の終了コード以外は、秘密情報の検出と区別する。
 	for _, code := range []int{1, 2, 127} {
-		runner := &scriptRunner{responses: map[string]response{"gitleaks": {err: &RunError{Name: "gitleaks", Code: code}}}}
-		if _, err := (Gitleaks{Run: runner, Bin: "gitleaks", Dir: "/tmp"}).Scan(context.Background(), []byte("+x")); err == nil {
+		runner := &scriptRunner{responses: map[string]response{"betterleaks": {err: &RunError{Name: "betterleaks", Code: code}}}}
+		if _, err := (Betterleaks{Run: runner, Bin: "betterleaks", Dir: "/tmp"}).Scan(context.Background(), []byte("+x")); err == nil {
 			t.Errorf("exit %d was ignored", code)
 		}
 	}
 }
 
-func TestGitleaksClean(t *testing.T) {
+func TestBetterleaksClean(t *testing.T) {
 	runner := &scriptRunner{responses: map[string]response{}}
-	leak, err := Gitleaks{Run: runner, Bin: "gitleaks", Dir: "/tmp"}.Scan(context.Background(), []byte("+x"))
+	leak, err := Betterleaks{Run: runner, Bin: "betterleaks", Dir: "/tmp"}.Scan(context.Background(), []byte("+x"))
 	if err != nil || leak {
 		t.Fatalf("leak=%v err=%v", leak, err)
 	}

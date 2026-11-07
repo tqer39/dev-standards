@@ -10,12 +10,12 @@ import (
 	"strconv"
 )
 
-// gitleaksLeakExit は検出専用の終了コードである。
-// gitleaks と mise の起動エラーは 1 で終わることがあるので、1 を検出に使わない。
-const gitleaksLeakExit = 42
+// betterleaksLeakExit は検出専用の終了コードである。
+// 既定の 1 は起動エラーと区別できないことがあるので、検出に使わない。
+const betterleaksLeakExit = 42
 
-// Gitleaks は差分を検査する。PR 側の設定で検査を緩められないよう、Dir で実行する。
-type Gitleaks struct {
+// Betterleaks は差分を検査する。PR 側の設定で検査を緩められないよう、Dir で実行する。
+type Betterleaks struct {
 	Run Runner
 	Bin string
 	// Prefix は Bin に続く引数である。mise で版を固定して起動するときに使う。
@@ -23,14 +23,14 @@ type Gitleaks struct {
 	Dir    string
 }
 
-func (g Gitleaks) Scan(ctx context.Context, patch []byte) (bool, error) {
-	args := append(append([]string{}, g.Prefix...), "stdin", "--no-banner", "--redact", "--exit-code", strconv.Itoa(gitleaksLeakExit))
+func (g Betterleaks) Scan(ctx context.Context, patch []byte) (bool, error) {
+	args := append(append([]string{}, g.Prefix...), "stdin", "--no-banner", "--redact", "--exit-code", strconv.Itoa(betterleaksLeakExit))
 	_, err := g.Run.Run(ctx, Cmd{Dir: g.Dir, Name: g.Bin, Args: args, Stdin: string(patch), Env: []string{"MISE_YES=1"}})
 	if err == nil {
 		return false, nil
 	}
 	var runErr *RunError
-	if errors.As(err, &runErr) && runErr.Code == gitleaksLeakExit {
+	if errors.As(err, &runErr) && runErr.Code == betterleaksLeakExit {
 		return true, nil
 	}
 	return false, fmt.Errorf("秘密情報スキャンを実行できません: %w", err)

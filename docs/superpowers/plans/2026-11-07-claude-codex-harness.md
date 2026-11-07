@@ -3,7 +3,7 @@
 <!-- Go のコード例はタブが正しい形式で、番号付きの手順はコード例をはさんで続くので除外する。 -->
 <!-- markdownlint-disable MD010 MD029 -->
 
-> **実装後の注記:** 実装中とレビューで変更した箇所があります。コードと仕様書を正とし、この計画は当時の手順の記録として読んでください。
+> **実装後の注記:** 実装中とレビューで変更した箇所があります。コードと仕様書を正とし、この計画は当時の手順の記録として読んでください。秘密情報スキャンは gitleaks から betterleaks に変更しました。
 >
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
