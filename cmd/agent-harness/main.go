@@ -154,7 +154,10 @@ func resolve(name string) (string, error) {
 }
 
 func miseWhich(name string) (string, error) {
-	out, err := exec.Command("mise", "which", name).Output()
+	// 止まると run や doctor が待ち続けるので、上限を設ける。
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "mise", "which", name).Output()
 	if err != nil {
 		return "", err
 	}

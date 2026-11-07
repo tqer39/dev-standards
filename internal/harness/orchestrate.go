@@ -399,13 +399,13 @@ func (o *Orchestrator) ensurePR(ctx context.Context, head, base, title, body str
 }
 
 func (o *Orchestrator) merge(ctx context.Context, rec *Record, config RepoConfig) error {
-	if err := o.Forge.ArmMerge(ctx, rec.PR, rec.HeadSHA); err != nil {
-		return o.stop(ctx, rec, "auto-merge を有効にできません: "+err.Error())
-	}
-	// 待機の後にマージされても検証できるよう、先に記録する。
+	// 有効化の直後に止まってマージされても Reconcile が検証できるよう、先に記録する。
 	rec.Status = StatusMergeArmed
 	if err := o.Store.Save(rec); err != nil {
 		return err
+	}
+	if err := o.Forge.ArmMerge(ctx, rec.PR, rec.HeadSHA); err != nil {
+		return o.stop(ctx, rec, "auto-merge を有効にできません: "+err.Error())
 	}
 	mergeCtx, cancel := context.WithTimeout(ctx, o.MergeLimit)
 	defer cancel()

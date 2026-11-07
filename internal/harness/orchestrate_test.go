@@ -109,6 +109,8 @@ type fakeForge struct {
 	prState     string
 	prSHA       string
 	open        map[string]int
+	onArm       func()
+	armErr      error
 }
 
 func (f *fakeForge) OpenPullRequest(_ context.Context, head string) (int, error) {
@@ -156,6 +158,12 @@ func (f *fakeForge) WaitCheck(context.Context, string, string) (bool, error) {
 }
 func (f *fakeForge) FailedLog(context.Context, string) (string, error) { return "log", nil }
 func (f *fakeForge) ArmMerge(_ context.Context, _ int, sha string) error {
+	if f.onArm != nil {
+		f.onArm()
+	}
+	if f.armErr != nil {
+		return f.armErr
+	}
 	f.armed = append(f.armed, sha)
 	return nil
 }
@@ -399,6 +407,38 @@ func TestDefaultConfigDoesNotWaitExternalReview(t *testing.T) {
 	}
 	if len(forge.waited) != 0 || rec.Status != StatusCompleted {
 		t.Fatalf("waited=%v status=%s", forge.waited, rec.Status)
+	}
+}
+
+func TestMergeArmedIsSavedBeforeArming(t *testing.T) {
+	agents := &fakeAgents{reviews: [][]byte{[]byte(passVerdict)}}
+	forge := &fakeForge{mergeResult: "merge"}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, forge, fakeScanner{})
+	// 有効化の直後に止まっても、Reconcile が main の確認まで進められるようにする。
+	var saved Status
+	forge.onArm = func() {
+		stored, err := orchestrator.Store.Load(rec.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved = stored.Status
+	}
+	if err := orchestrator.Run(context.Background(), rec, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if saved != StatusMergeArmed {
+		t.Fatalf("saved=%s", saved)
+	}
+}
+
+func TestArmFailureStops(t *testing.T) {
+	agents := &fakeAgents{reviews: [][]byte{[]byte(passVerdict)}}
+	forge := &fakeForge{armErr: errors.New("denied")}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, forge, fakeScanner{})
+	err := orchestrator.Run(context.Background(), rec, nil, true)
+	stored, loadErr := orchestrator.Store.Load(rec.RunID)
+	if !errors.Is(err, ErrStopped) || loadErr != nil || stored.Status != StatusStopped {
+		t.Fatalf("err=%v stored=%+v loadErr=%v", err, stored, loadErr)
 	}
 }
 
