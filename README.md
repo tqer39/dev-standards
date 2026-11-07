@@ -22,6 +22,8 @@ macOS、Linux、Windows で同じ CLI と mise タスクを使用します。
 更新 PR の自動検証・マージ、版の更新と利用先への移行にも対応します。
 初回設定と運用条件は [自律保守](docs/autonomous-maintenance.md) を参照してください。
 
+Claude と Codex で実装からマージまでを進める手順は [agent-harness の運用](docs/agent-harness.md) を参照してください。
+
 AGENTS.md を rulesync で生成している利用先では、共通の入口を rulesync のルールとして配置できます。
 dev-standards 自身による rulesync を使った他の LLM への配布、Renovate の共通設定、GitHub 管理設定の変更、
 言語別の検証を自動構成する複数言語のモノレポ対応は後続の実装です。
