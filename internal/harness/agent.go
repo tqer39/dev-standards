@@ -207,7 +207,7 @@ func (h *Herdr) WaitImplementer(ctx context.Context, rec *Record, work string, l
 }
 
 func reviewArgs(claude, model, prompt string) []string {
-	settings := `{"permissions":{"deny":["Read(~/.ssh/**)","Read(~/.aws/**)","Read(~/.config/gh/**)","Read(~/.config/op/**)","Read(~/.codex/**)","Read(~/.local/state/agent-harness/**)"]}}`
+	settings := `{"permissions":{"deny":["Read(~/.ssh/**)","Read(~/.aws/**)","Read(~/.config/gh/**)","Read(~/.config/op/**)","Read(~/.codex/**)","Read(~/.local/state/agent-harness/codex-api-home/**)"]}}`
 	return []string{
 		claude, "-p", "--model", model,
 		"--output-format", "json", "--json-schema", VerdictSchema,

@@ -187,3 +187,13 @@ func TestWaitImplementerDetectsAPIBudgetExhaustion(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewCanReadOwnDirectoryButNotAPIKey(t *testing.T) {
+	joined := strings.Join(reviewArgs("/abs/claude", "m", "p"), " ")
+	if strings.Contains(joined, "Read(~/.local/state/agent-harness/**)") {
+		t.Fatalf("the review directory must stay readable: %s", joined)
+	}
+	if !strings.Contains(joined, "Read(~/.local/state/agent-harness/codex-api-home/**)") {
+		t.Fatalf("the API key must stay denied: %s", joined)
+	}
+}
