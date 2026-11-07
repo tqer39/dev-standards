@@ -137,6 +137,21 @@ func TestAdoptReapplyOffline(t *testing.T) {
 	if !found {
 		t.Fatal("unexecuted checks reported as complete")
 	}
+	for _, rule := range []string{"CORE-ACTIONS-SECURITY", "CORE-CI-SPEED", "CORE-RENOVATE-GROUPING"} {
+		matched := 0
+		for _, r := range report.Results {
+			if r.Rule != rule {
+				continue
+			}
+			matched++
+			if r.Status != "review_required" {
+				t.Fatalf("unevaluated rule reported as %s: %+v", r.Status, r)
+			}
+		}
+		if matched != 1 {
+			t.Fatalf("%s: got %d results", rule, matched)
+		}
+	}
 }
 func TestPreservesExistingConfiguration(t *testing.T) {
 	tree := fixture(t)

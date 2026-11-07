@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "CORE-RENOVATE-GROUPING",
+  "revision": 1,
+  "status": "active",
+  "title": "Renovate の更新を同じカテゴリでまとめる",
+  "rationale": "Renovate の PR ごとに CI が実行されるので、PR の数を減らして CI の実行回数を抑える。",
+  "appliesTo": {
+    "profiles": [
+      "base"
+    ]
+  },
+  "phases": [
+    "adopt",
+    "pr"
+  ],
+  "enforcement": {
+    "level": "advisory",
+    "waivable": false
+  },
+  "checks": [
+    {
+      "id": "review",
+      "type": "review",
+      "handler": "renovate-grouping",
+      "parameters": {}
+    }
+  ],
+  "remediation": {
+    "mode": "assisted",
+    "handler": "renovate-config",
+    "instructions": "個別に作られている minor と patch の PR を確認し、同じカテゴリの依存を groupName でまとめる。"
+  },
+  "guidance": "guidance/core/renovate-grouping.md",
+  "references": [
+    "https://docs.renovatebot.com/noise-reduction/"
+  ]
+}

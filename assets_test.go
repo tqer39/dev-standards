@@ -10,7 +10,7 @@ func TestCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rules) != 7 {
+	if len(rules) != 10 {
 		t.Fatalf("got %d rules", len(rules))
 	}
 	if Digest() == "" || !strings.Contains(Read("templates/base/gitignore.txt"), "Created by https://www.toptal.com/developers/gitignore/api/") {

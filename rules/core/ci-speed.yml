@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "CORE-CI-SPEED",
+  "revision": 1,
+  "status": "active",
+  "title": "CI をキャッシュで短縮し、3分以上かかる処理を見直す",
+  "rationale": "CI の待ち時間が開発と依存更新の流れを止めないようにする。",
+  "appliesTo": {
+    "profiles": [
+      "base"
+    ]
+  },
+  "phases": [
+    "adopt",
+    "pr"
+  ],
+  "enforcement": {
+    "level": "warning",
+    "waivable": false
+  },
+  "checks": [
+    {
+      "id": "review",
+      "type": "review",
+      "handler": "ci-speed",
+      "parameters": {}
+    }
+  ],
+  "remediation": {
+    "mode": "assisted",
+    "handler": "workflow",
+    "instructions": "直近の実行時間とキャッシュの効きを確認し、3分以上かかるジョブの処理を見直す。必須の検査を減らして短縮しない。"
+  },
+  "guidance": "guidance/core/ci-speed.md",
+  "references": [
+    "https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching"
+  ]
+}
