@@ -2271,10 +2271,10 @@ Expected: PASS
 
 - [ ] **Step 6: 実物の gitleaks で確認する**
 
-検出用の値は、gitleaks の検出を確かめるための架空の値である。
+検出用の値は、その場で生成する架空の値である。`EXAMPLE` を含む文書用のサンプル値は gitleaks の除外対象なので使わない。
 
 ```bash
-printf '+aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"\n' | mise exec -- gitleaks stdin --no-banner --redact --exit-code 1; echo "exit=$?"
+printf '+token = "ghp_%s"\n' "$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 36)" | mise exec -- gitleaks stdin --no-banner --redact --exit-code 1; echo "exit=$?"
 printf '+hello\n' | mise exec -- gitleaks stdin --no-banner --redact --exit-code 1; echo "exit=$?"
 ```
 
@@ -4901,7 +4901,7 @@ Expected: `exit=0`、状態 `completed`。PR がマージされ、PR の作成�
 | --- | --- | --- |
 | 人間の確認が必要なパス | `AGENTS.md` を作成する | `exit=4`、PR に `needs-human`、未マージ |
 | ワークフローの変更 | `.github/workflows/ci.yml` にコメントを足す | `exit=4`。push が App の権限で拒否されるか、PR が `needs-human` で止まる |
-| 秘密情報 | `key.txt` に `aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"` と書く（架空の値） | `exit=4`、**PR もブランチも作られない** |
+| 秘密情報 | `key.txt` に `ghp_` とランダムな英数字 36 文字からなる架空の値を書く（`EXAMPLE` を含む値は検出されない） | `exit=4`、**PR もブランチも作られない** |
 | CI の失敗と修正 | `status.txt` を `bad` に変える | 修正が 2 回まで試みられ、最終的に合格するか `exit=4` で止まる |
 | 差分なし | 何も変更しないよう指示する | `exit=4`、差分なしが理由 |
 
