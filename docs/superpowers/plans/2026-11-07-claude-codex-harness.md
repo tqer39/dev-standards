@@ -4485,6 +4485,8 @@ git commit -m "docs: agent-harness の運用手順を追加"
 
 ### Task 16: terraform-github
 
+**実行結果: 不要と判断して実施していない。** `origin/main` で `dev-standards`（#1825）、`agent-telemetry`（#1815）、`omnodi`（#1824）はすでに管理されている。`strict` の有効化は自律保守を止めるおそれがあるので、仕様書の将来の候補に移した。以下は当初の手順の記録である。
+
 **常設ルールにより PR を作成する。マージは人間が判断する。** マージすると適用まで進むので、`terraform plan` の差分を PR に記載する。
 
 **Files:**（`/Users/takeruooyama/workspace/tqer39/terraform-github` の新しいブランチ）

@@ -254,7 +254,7 @@ Mac が停止していた場合は、次回の起動時に未確認のマージ�
 | リポジトリ | 改善内容 |
 | --- | --- |
 | `agent-telemetry` | 作業ディレクトリから得た `run_id` による Claude と Codex の紐づけ、実行記録からのエフォートと PR のマージ結果の取り込み |
-| `terraform-github` | `dev-standards` と `agent-telemetry` の管理への追加、`infra-canvas` 定義の `omnodi` への更新、対象リポジトリの `strict_required_status_checks_policy` の有効化 |
+| `terraform-github` | なし（`dev-standards`、`agent-telemetry`、`omnodi` は管理済み） |
 
 ## auto-merge の経路
 
@@ -315,6 +315,12 @@ Mac が停止していた場合は、次回の起動時に未確認のマージ�
 ### `agent-review` の必須チェック化
 
 ハーネスを通さないマージが問題になった場合は、自律保守と Renovate を除外できる方法を検討する。
+
+### 最新 main での検証の必須化
+
+`strict_required_status_checks_policy` は有効にしない。
+有効にすると、自律保守の `waitMergeReady` が `BEHIND` のまま時間切れになるおそれがある。
+同時実行の排他とマージ後の自動 revert で扱い、PR の組み合わせによる障害が実際に起きた場合に検討する。
 
 ### Actions でのレビュー
 
