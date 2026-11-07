@@ -98,6 +98,13 @@ bin/agent-harness reconcile --repo <owner>/<name>
 `external_review_check` に `none` を指定すると、外部レビューの完了を待たない。
 未解決のスレッドは、この設定にかかわらず確認する。
 
+CodeRabbit は、シートのない GitHub App が作成した PR をレビューしない。
+`@coderabbitai review` を送っても「bot にシートが割り当てられていない」と返すだけである。
+レビューには、CodeRabbit の Team Management で App の bot にシートを割り当てる必要がある。
+
+スキップや上限到達でも `CodeRabbit` の check は `completed` になる（`skipped` や `neutral`）。
+ハーネスは結果を区別しないので、レビューが実行されなくても次に進み、記録にも残らない。
+
 ## 関連リポジトリの改善
 
 `agent-telemetry`、`omnodi`、`terraform-github` に改善が必要なときは、都度 PR を出す。
