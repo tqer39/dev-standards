@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -54,6 +56,25 @@ func (s OPSecrets) Read(ctx context.Context, ref string) (string, error) {
 	return strings.TrimSpace(value), nil
 }
 
+// requiredPermissions はハーネスが要求する権限である。workflows と administration は含めない。
+var requiredPermissions = map[string]string{
+	"contents": "write", "pull_requests": "write", "statuses": "write",
+	"metadata": "read", "checks": "read", "actions": "read",
+}
+
+func missingPermissions(granted map[string]string) []string {
+	var missing []string
+	for name, level := range requiredPermissions {
+		have := granted[name]
+		if have == "write" || (have == "read" && level == "read") {
+			continue
+		}
+		missing = append(missing, name+": "+level)
+	}
+	slices.Sort(missing)
+	return missing
+}
+
 type TokenSource interface {
 	Token(context.Context) (string, error)
 }
@@ -88,18 +109,19 @@ func (a *AppTokens) Token(ctx context.Context) (string, error) {
 		return "", err
 	}
 	var installation struct {
-		ID int64 `json:"id"`
+		ID          int64             `json:"id"`
+		Permissions map[string]string `json:"permissions"`
 	}
 	if err := a.call(ctx, http.MethodGet, "/repos/"+a.Repo+"/installation", jwt, nil, &installation); err != nil {
 		return "", err
 	}
+	if missing := missingPermissions(installation.Permissions); len(missing) > 0 {
+		return "", fmt.Errorf("GitHub App の権限が不足しています（設定後にインストール先で権限の更新を承認してください）: %s", strings.Join(missing, ", "))
+	}
 	_, name, _ := strings.Cut(a.Repo, "/")
 	request := map[string]any{
 		"repositories": []string{name},
-		"permissions": map[string]string{
-			"contents": "write", "pull_requests": "write", "statuses": "write",
-			"metadata": "read", "checks": "read", "actions": "read",
-		},
+		"permissions":  requiredPermissions,
 	}
 	var minted struct {
 		Token string `json:"token"`
@@ -138,19 +160,50 @@ func (a *AppTokens) call(ctx context.Context, method, path, jwt string, body, ou
 	}
 	defer response.Body.Close()
 	if response.StatusCode >= 300 {
-		return fmt.Errorf("GitHub API %s が %d を返しました", path, response.StatusCode)
+		var detail struct {
+			Message string `json:"message"`
+		}
+		// 本文に秘密情報は含まれない。読めなければ状態コードだけを返す。
+		_ = json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&detail)
+		return fmt.Errorf("GitHub API %s が %d を返しました: %s", path, response.StatusCode, truncate(detail.Message, 200))
 	}
 	return json.NewDecoder(response.Body).Decode(out)
 }
 
-func signJWT(appID, keyPEM string, now time.Time) (string, error) {
-	block, _ := pem.Decode([]byte(keyPEM))
-	if block == nil {
-		return "", errors.New("GitHub App の秘密鍵を解釈できません")
+var pemBlock = regexp.MustCompile(`(?s)(-----BEGIN [A-Z ]+-----)(.*?)(-----END [A-Z ]+-----)`)
+
+// parseAppKey は GitHub App の秘密鍵を読む。
+// パスワード管理ツールで改行が空白や文字列の \\n に変わった場合も復元する。
+// エラーに鍵の内容を含めない。
+func parseAppKey(text string) (*rsa.PrivateKey, error) {
+	text = strings.ReplaceAll(text, `\n`, "\n")
+	match := pemBlock.FindStringSubmatch(text)
+	if match == nil {
+		return nil, errors.New("GitHub App の秘密鍵に PEM の開始行と終了行がありません")
 	}
-	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	body := strings.Join(strings.Fields(match[2]), "\n")
+	block, _ := pem.Decode([]byte(match[1] + "\n" + body + "\n" + match[3] + "\n"))
+	if block == nil {
+		return nil, errors.New("GitHub App の秘密鍵の PEM を解釈できません")
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return "", errors.New("GitHub App の秘密鍵を解釈できません")
+		return nil, errors.New("GitHub App の秘密鍵の形式を解釈できません")
+	}
+	key, ok := parsed.(*rsa.PrivateKey)
+	if !ok {
+		return nil, errors.New("GitHub App の秘密鍵が RSA ではありません")
+	}
+	return key, nil
+}
+
+func signJWT(appID, keyPEM string, now time.Time) (string, error) {
+	key, err := parseAppKey(keyPEM)
+	if err != nil {
+		return "", err
 	}
 	encode := base64.RawURLEncoding.EncodeToString
 	header := encode([]byte(`{"alg":"RS256","typ":"JWT"}`))
