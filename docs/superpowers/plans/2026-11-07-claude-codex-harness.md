@@ -211,7 +211,7 @@ Codex の利用上限の解除後に実行する。作業ディレクトリは S
 ```bash
 W="$(mktemp -d "$HOME/.agent-harness-probe.XXXXXX")"; git -C "$W" init -q -b main; git -C "$W" -c user.name=probe -c user.email=probe@example.invalid commit -q --allow-empty -m init
 CX="$(command -v codex)"
-hc run --bg --json --name probe-impl --cwd "$W" --no-parent -- "$CX" --no-daemon -p agent-harness -c "projects.\"$W\".trust_level=\"trusted\"" --ask-for-approval never "hello.txt を作り、内容を ok の1行にしてください。"
+hc run --bg --json --name probe-impl --cwd "$W" --no-parent -- "$CX" -p agent-harness -c "projects.\"$W\".trust_level=\"trusted\"" --ask-for-approval never "hello.txt を作り、内容を ok の1行にしてください。"
 hc wait probe-impl --timeout 120 --json
 hc read probe-impl --lines 20
 cat "$W/hello.txt"
@@ -219,7 +219,17 @@ hc kill probe-impl
 hc rm probe-impl
 ```
 
-Expected: 信頼確認で止まらず、`hello.txt` が `ok` になる。`--no-daemon` が拒否された場合は外して再試行し、結果を Task 10 の `implementerArgs` に反映する。
+Expected: 信頼確認で止まらず、`hello.txt` が `ok` になる。Codex 0.148 は `--no-daemon` を受け付けないので付けない。
+
+**実セッションの制限も確認する。** `codex sandbox` の検証は別プロセスなので、起動した Codex に次を実行させ、すべて失敗することを画面で確認する。内容は表示させず、成否だけを報告させる。
+
+```text
+curl -sS -m 10 -o /dev/null https://api.github.com/
+test -r ~/.config/gh/hosts.yml
+gh auth status
+```
+
+1 つでも成功したら、Codex が別のプロセスや常駐サーバーでコマンドを実行している可能性がある。**ここで止めて人間に報告する。**
 
 - [ ] **Step 6: Claude のレビュー引数を確認する**
 
@@ -2326,7 +2336,7 @@ func TestStartImplementerUsesProfileWithoutSecrets(t *testing.T) {
 	if strings.Contains(joined, "mcp_servers.off") {
 		t.Errorf("disabled server was passed: %s", joined)
 	}
-	for _, part := range []string{"mcp_servers.context7.enabled=false", "--bg", "--name impl-r1", "--cwd /work", "--no-parent", "/abs/codex", "--no-daemon", "-p agent-harness", "-m gpt-6.1-sol", `model_reasoning_effort="high"`, `projects."/work".trust_level="trusted"`, "--ask-for-approval never"} {
+	for _, part := range []string{"mcp_servers.context7.enabled=false", "--bg", "--name impl-r1", "--cwd /work", "--no-parent", "/abs/codex", "-p agent-harness", "-m gpt-6.1-sol", `model_reasoning_effort="high"`, `projects."/work".trust_level="trusted"`, "--ask-for-approval never"} {
 		if !strings.Contains(joined, part) {
 			t.Errorf("missing %q in %s", part, joined)
 		}
@@ -2515,7 +2525,7 @@ func (h *Herdr) enabledMCP(ctx context.Context) ([]string, error) {
 func (h *Herdr) implementerArgs(rec *Record, work, prompt string, disabledMCP []string) []string {
 	args := []string{
 		"run", "--bg", "--json", "--name", implName(rec), "--cwd", work, "--no-parent", "--",
-		h.Codex, "--no-daemon", "-p", "agent-harness", "-m", rec.Model,
+		h.Codex, "-p", "agent-harness", "-m", rec.Model,
 		"-c", fmt.Sprintf("model_reasoning_effort=%q", rec.Effort),
 		"-c", fmt.Sprintf("projects.%q.trust_level=%q", work, "trusted"),
 	}

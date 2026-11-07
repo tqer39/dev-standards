@@ -29,7 +29,7 @@ func TestStartImplementerUsesProfileWithoutSecrets(t *testing.T) {
 	if strings.Contains(joined, "mcp_servers.off") {
 		t.Errorf("disabled server was passed: %s", joined)
 	}
-	for _, part := range []string{"mcp_servers.context7.enabled=false", "--bg", "--name impl-r1", "--cwd /work", "--no-parent", "/abs/codex", "--no-daemon", "-p agent-harness", "-m gpt-6.1-sol", `model_reasoning_effort="high"`, `projects."/work".trust_level="trusted"`, "--ask-for-approval never"} {
+	for _, part := range []string{"mcp_servers.context7.enabled=false", "--bg", "--name impl-r1", "--cwd /work", "--no-parent", "/abs/codex", "-p agent-harness", "-m gpt-6.1-sol", `model_reasoning_effort="high"`, `projects."/work".trust_level="trusted"`, "--ask-for-approval never"} {
 		if !strings.Contains(joined, part) {
 			t.Errorf("missing %q in %s", part, joined)
 		}

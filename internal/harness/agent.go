@@ -74,7 +74,7 @@ func (h *Herdr) enabledMCP(ctx context.Context) ([]string, error) {
 func (h *Herdr) implementerArgs(rec *Record, work, prompt string, disabledMCP []string) []string {
 	args := []string{
 		"run", "--bg", "--json", "--name", implName(rec), "--cwd", work, "--no-parent", "--",
-		h.Codex, "--no-daemon", "-p", "agent-harness", "-m", rec.Model,
+		h.Codex, "-p", "agent-harness", "-m", rec.Model,
 		"-c", fmt.Sprintf("model_reasoning_effort=%q", rec.Effort),
 		"-c", fmt.Sprintf("projects.%q.trust_level=%q", work, "trusted"),
 	}
