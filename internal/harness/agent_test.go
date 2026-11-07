@@ -1,0 +1,136 @@
+//go:build !windows
+
+package harness
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+)
+
+func herdrFor(runner Runner) *Herdr {
+	return &Herdr{Run: runner, HC: "hc", Codex: "/abs/codex", Claude: "/abs/claude", Poll: time.Millisecond}
+}
+
+func TestStartImplementerUsesProfileWithoutSecrets(t *testing.T) {
+	runner := &scriptRunner{responses: map[string]response{
+		"/abs/codex -p": {out: `[{"name":"context7","enabled":true},{"name":"off","enabled":false}]`},
+	}}
+	rec := &Record{RunID: "r1", Model: "gpt-6.1-sol", Effort: "high"}
+	if err := herdrFor(runner).StartImplementer(context.Background(), rec, "/work", "task"); err != nil {
+		t.Fatal(err)
+	}
+	call := runner.calls[1]
+	joined := strings.Join(call.Args, " ")
+	if strings.Contains(joined, "mcp_servers.off") {
+		t.Errorf("disabled server was passed: %s", joined)
+	}
+	for _, part := range []string{"mcp_servers.context7.enabled=false", "--bg", "--name impl-r1", "--cwd /work", "--no-parent", "/abs/codex", "--no-daemon", "-p agent-harness", "-m gpt-6.1-sol", `model_reasoning_effort="high"`, `projects."/work".trust_level="trusted"`, "--ask-for-approval never"} {
+		if !strings.Contains(joined, part) {
+			t.Errorf("missing %q in %s", part, joined)
+		}
+	}
+	if len(call.Env) != 0 {
+		t.Fatalf("env must be empty: %v", call.Env)
+	}
+}
+
+func TestWaitImplementerFindsResult(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".agent-run"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".agent-run", "result.json"), []byte(`{"run_id":"r1","round":0,"status":"done","summary":"s"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &scriptRunner{responses: map[string]response{}}
+	outcome, result, err := herdrFor(runner).WaitImplementer(context.Background(), &Record{RunID: "r1"}, dir, time.Minute)
+	if err != nil || outcome != ImplDone || result.Summary != "s" {
+		t.Fatalf("outcome=%v result=%+v err=%v", outcome, result, err)
+	}
+}
+
+func TestWaitImplementerDetectsQuotaFromScreen(t *testing.T) {
+	runner := &scriptRunner{responses: map[string]response{
+		"hc wait": {out: `{"ended":false,"reason":"timeout","status":null}`},
+		"hc read": {out: "■ You've hit your usage limit. Visit settings\n"},
+	}}
+	outcome, _, err := herdrFor(runner).WaitImplementer(context.Background(), &Record{RunID: "r1"}, t.TempDir(), time.Minute)
+	if err != nil || outcome != ImplQuota {
+		t.Fatalf("outcome=%v err=%v", outcome, err)
+	}
+}
+
+func TestWaitImplementerDetectsTrustPromptAndExit(t *testing.T) {
+	runner := &scriptRunner{responses: map[string]response{
+		"hc wait": {out: `{"ended":false,"reason":"timeout"}`},
+		"hc read": {out: "Do you trust the contents of this directory?\n"},
+	}}
+	outcome, _, err := herdrFor(runner).WaitImplementer(context.Background(), &Record{RunID: "r1"}, t.TempDir(), time.Minute)
+	if err != nil || outcome != ImplBlocked {
+		t.Fatalf("trust: outcome=%v err=%v", outcome, err)
+	}
+	runner = &scriptRunner{responses: map[string]response{"hc wait": {out: `{"ended":true,"exit_code":1}`}}}
+	outcome, _, err = herdrFor(runner).WaitImplementer(context.Background(), &Record{RunID: "r1"}, t.TempDir(), time.Minute)
+	if err != nil || outcome != ImplExited {
+		t.Fatalf("exit: outcome=%v err=%v", outcome, err)
+	}
+}
+
+func TestWaitImplementerTimesOut(t *testing.T) {
+	runner := &scriptRunner{responses: map[string]response{
+		"hc wait": {out: `{"ended":false,"reason":"timeout"}`},
+		"hc read": {out: "working\n"},
+	}}
+	outcome, _, err := herdrFor(runner).WaitImplementer(context.Background(), &Record{RunID: "r1"}, t.TempDir(), 0)
+	if err != nil || outcome != ImplTimeout {
+		t.Fatalf("outcome=%v err=%v", outcome, err)
+	}
+}
+
+func TestReviewArgumentsAreReadOnly(t *testing.T) {
+	args := reviewArgs("/abs/claude", "claude-opus-5-5", "prompt")
+	joined := strings.Join(args, " ")
+	if !slices.Contains(args, "Read,Grep,Glob") || !strings.Contains(joined, "--strict-mcp-config") || !strings.Contains(joined, "-p") {
+		t.Fatalf("args=%v", args)
+	}
+	for _, forbidden := range []string{"Bash", "Write", "Edit", "WebFetch", "bypassPermissions"} {
+		if strings.Contains(joined, forbidden) {
+			t.Errorf("%s must not be allowed: %s", forbidden, joined)
+		}
+	}
+}
+
+func TestReviewReadsVerdictFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".agent-run"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".agent-run", "verdict.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &scriptRunner{responses: map[string]response{"hc wait": {out: `{"ended":true,"exit_code":0}`}}}
+	outcome, data, err := herdrFor(runner).Review(context.Background(), &Record{RunID: "r1", ReviewerModel: "m"}, dir, "p", time.Minute)
+	if err != nil || outcome != ReviewDone || string(data) != "{}" {
+		t.Fatalf("outcome=%v data=%q err=%v", outcome, data, err)
+	}
+}
+
+func TestReviewDetectsQuota(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".agent-run"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".agent-run", "verdict.err"), []byte("Claude usage limit reached"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &scriptRunner{responses: map[string]response{"hc wait": {out: `{"ended":true,"exit_code":1}`}}}
+	outcome, _, err := herdrFor(runner).Review(context.Background(), &Record{RunID: "r1", ReviewerModel: "m"}, dir, "p", time.Minute)
+	if err != nil || outcome != ReviewQuota {
+		t.Fatalf("outcome=%v err=%v", outcome, err)
+	}
+}
