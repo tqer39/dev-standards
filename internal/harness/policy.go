@@ -141,7 +141,6 @@ func LoadRepoConfig(baseDir string) (RepoConfig, error) {
 		Policy:                DefaultPolicy(),
 		Verify:                []string{"mise", "run", "check"},
 		RequiredCheck:         "workflow-result",
-		ExternalReviewCheck:   "CodeRabbit",
 		ExternalReviewAuthors: []string{"coderabbitai"},
 	}
 	data, err := os.ReadFile(filepath.Join(baseDir, ".agent-harness", "policy.json"))
@@ -155,7 +154,7 @@ func LoadRepoConfig(baseDir string) (RepoConfig, error) {
 		StopPaths     []string `json:"stop_paths"`
 		Verify        []string `json:"verify"`
 		RequiredCheck string   `json:"required_check"`
-		// "none" を指定すると外部レビューを待たない。
+		// CodeRabbit はシートのない App の PR をレビューしないので、指定したときだけ待つ。
 		ExternalReviewCheck   string   `json:"external_review_check"`
 		ExternalReviewAuthors []string `json:"external_review_authors"`
 	}
@@ -169,13 +168,7 @@ func LoadRepoConfig(baseDir string) (RepoConfig, error) {
 	if file.RequiredCheck != "" {
 		config.RequiredCheck = file.RequiredCheck
 	}
-	switch file.ExternalReviewCheck {
-	case "":
-	case "none":
-		config.ExternalReviewCheck = ""
-	default:
-		config.ExternalReviewCheck = file.ExternalReviewCheck
-	}
+	config.ExternalReviewCheck = file.ExternalReviewCheck
 	if len(file.ExternalReviewAuthors) > 0 {
 		config.ExternalReviewAuthors = file.ExternalReviewAuthors
 	}

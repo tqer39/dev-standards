@@ -4,6 +4,8 @@ package harness
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -113,7 +115,25 @@ func TestLoadRepoConfigExternalReviewDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.ExternalReviewCheck != "CodeRabbit" || config.ExternalReviewAuthors[0] != "coderabbitai" {
+	// CodeRabbit はシートのない App の PR をレビューしないので、既定では待たない。
+	if config.ExternalReviewCheck != "" || config.ExternalReviewAuthors[0] != "coderabbitai" {
+		t.Fatalf("config=%+v", config)
+	}
+}
+
+func TestLoadRepoConfigExternalReviewCheckIsOptIn(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".agent-harness"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".agent-harness", "policy.json"), []byte(`{"external_review_check":"CodeRabbit"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := LoadRepoConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.ExternalReviewCheck != "CodeRabbit" {
 		t.Fatalf("config=%+v", config)
 	}
 }

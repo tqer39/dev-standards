@@ -89,21 +89,23 @@ bin/agent-harness reconcile --repo <owner>/<name>
 {
   "stop_paths": ["billing/**"],
   "verify": ["mise", "run", "check"],
-  "required_check": "workflow-result",
-  "external_review_check": "CodeRabbit",
-  "external_review_authors": ["coderabbitai"]
+  "required_check": "workflow-result"
 }
 ```
 
-`external_review_check` に `none` を指定すると、外部レビューの完了を待たない。
-未解決のスレッドは、この設定にかかわらず確認する。
+### CodeRabbit
+
+ハーネスの PR は、CodeRabbit なしで運用する。レビューは別モデルの 1 段だけである。
 
 CodeRabbit は、シートのない GitHub App が作成した PR をレビューしない。
 `@coderabbitai review` を送っても「bot にシートが割り当てられていない」と返すだけである。
 レビューには、CodeRabbit の Team Management で App の bot にシートを割り当てる必要がある。
 
-スキップや上限到達でも `CodeRabbit` の check は `completed` になる（`skipped` や `neutral`）。
-ハーネスは結果を区別しないので、レビューが実行されなくても次に進み、記録にも残らない。
+外部レビューの完了は既定で待たない。未解決のスレッドは毎回確認し、人間のコメントがあれば止まる。
+
+シートを割り当てたリポジトリでは、`external_review_check` と `external_review_authors` を指定できる。
+ただし、スキップや上限到達でも check は `completed` になり（`skipped` や `neutral`）、ハーネスは結果を区別しない。
+レビューが実行されなくても次に進むので、有効にする前に実機で待ち方を確認する。
 
 ## 関連リポジトリの改善
 

@@ -385,6 +385,23 @@ func TestExternalFindingIsRepairedThenResolved(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigDoesNotWaitExternalReview(t *testing.T) {
+	agents := &fakeAgents{reviews: [][]byte{[]byte(passVerdict)}}
+	forge := &fakeForge{mergeResult: "merge"}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, forge, fakeScanner{})
+	config, err := LoadRepoConfig(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	orchestrator.Config = func(string) (RepoConfig, error) { return config, nil }
+	if err := orchestrator.Run(context.Background(), rec, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(forge.waited) != 0 || rec.Status != StatusCompleted {
+		t.Fatalf("waited=%v status=%s", forge.waited, rec.Status)
+	}
+}
+
 func TestResolvesOnlyThreadsStillOpen(t *testing.T) {
 	agents := &fakeAgents{reviews: [][]byte{[]byte(passVerdict)}}
 	// CodeRabbit が修正を検知して自分で解決した場合は、ハーネスは何もしない。
