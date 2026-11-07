@@ -40,6 +40,13 @@ expect_read_denied "gh の認証情報の読み取り" "$HOME/.config/gh/hosts.y
 expect_read_denied "SSH の読み取り"          "$HOME/.ssh"
 expect_read_denied "Codex の認証の読み取り"  "$HOME/.codex/auth.json"
 expect_read_denied "Codex の設定の読み取り"  "$HOME/.codex/config.toml"
+
+# API キー専用の Codex ホームは状態ディレクトリの下にある。試験用のファイルで確認する。
+state="$HOME/.local/state/agent-harness"
+mkdir -p "$state"
+probe_file="$(mktemp "$state/.probe.XXXXXX")"
+expect_read_denied "ハーネスの状態の読み取り" "$probe_file"
+rm -f "$probe_file"
 expect_denied ".git/hooks への書き込み"   sh -c 'echo x > .git/hooks/pre-commit'
 expect_denied ".git/config への書き込み"  sh -c 'echo x >> .git/config'
 

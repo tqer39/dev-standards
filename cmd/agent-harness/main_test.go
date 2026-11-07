@@ -72,3 +72,20 @@ func TestClaudeLoggedIn(t *testing.T) {
 		t.Fatal("invalid output was accepted")
 	}
 }
+
+func TestCodexHomeForAuth(t *testing.T) {
+	t.Setenv("HOME", "/home/u")
+	if home, err := codexHomeFor(""); err != nil || home != "" {
+		t.Fatalf("home=%q err=%v", home, err)
+	}
+	if home, err := codexHomeFor("chatgpt"); err != nil || home != "" {
+		t.Fatalf("home=%q err=%v", home, err)
+	}
+	home, err := codexHomeFor("api-key")
+	if err != nil || home != "/home/u/.local/state/agent-harness/codex-api-home" {
+		t.Fatalf("home=%q err=%v", home, err)
+	}
+	if _, err := codexHomeFor("other"); err == nil {
+		t.Fatal("unknown auth was accepted")
+	}
+}

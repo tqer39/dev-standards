@@ -33,7 +33,7 @@ const (
 )
 
 var (
-	quotaPattern = regexp.MustCompile(`(?i)usage limit|hit your .*limit|rate limit reached|out of (credits|usage)`)
+	quotaPattern = regexp.MustCompile(`(?i)usage limit|hit your .*limit|rate limit reached|out of (credits|usage)|insufficient_quota|exceeded your current quota`)
 	trustPattern = regexp.MustCompile(`(?i)do you trust the contents`)
 )
 
@@ -44,6 +44,8 @@ type Herdr struct {
 	Codex  string
 	Claude string
 	Poll   time.Duration
+	// CodexHome が空でなければ、この Codex ホームで実装担当を動かす。
+	CodexHome string
 }
 
 func implName(rec *Record) string   { return "impl-" + rec.RunID }
@@ -51,7 +53,11 @@ func reviewName(rec *Record) string { return "review-" + rec.RunID }
 
 // enabledMCP は有効な MCP サーバーを返す。MCP にはドメイン制限が効かないので、実装担当では止める。
 func (h *Herdr) enabledMCP(ctx context.Context) ([]string, error) {
-	out, err := h.Run.Run(ctx, Cmd{Name: h.Codex, Args: []string{"-p", "agent-harness", "mcp", "list", "--json"}})
+	var env []string
+	if h.CodexHome != "" {
+		env = []string{"CODEX_HOME=" + h.CodexHome}
+	}
+	out, err := h.Run.Run(ctx, Cmd{Name: h.Codex, Args: []string{"-p", "agent-harness", "mcp", "list", "--json"}, Env: env})
 	if err != nil {
 		return nil, err
 	}
@@ -72,12 +78,16 @@ func (h *Herdr) enabledMCP(ctx context.Context) ([]string, error) {
 }
 
 func (h *Herdr) implementerArgs(rec *Record, work, prompt string, disabledMCP []string) []string {
-	args := []string{
-		"run", "--bg", "--json", "--name", implName(rec), "--cwd", work, "--no-parent", "--",
+	args := []string{"run", "--bg", "--json", "--name", implName(rec), "--cwd", work, "--no-parent", "--"}
+	if h.CodexHome != "" {
+		// hc の端末は呼び出し元の環境を引き継がない。値はパスだけで秘密情報ではない。
+		args = append(args, "/usr/bin/env", "CODEX_HOME="+h.CodexHome)
+	}
+	args = append(args,
 		h.Codex, "-p", "agent-harness", "-m", rec.Model,
 		"-c", fmt.Sprintf("model_reasoning_effort=%q", rec.Effort),
 		"-c", fmt.Sprintf("projects.%q.trust_level=%q", work, "trusted"),
-	}
+	)
 	for _, name := range disabledMCP {
 		args = append(args, "-c", "mcp_servers."+name+".enabled=false")
 	}

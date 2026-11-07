@@ -134,3 +134,43 @@ func TestReviewDetectsQuota(t *testing.T) {
 		t.Fatalf("outcome=%v err=%v", outcome, err)
 	}
 }
+
+func TestStartImplementerUsesDedicatedCodexHome(t *testing.T) {
+	runner := &scriptRunner{responses: map[string]response{"/abs/codex -p": {out: `[]`}}}
+	herdr := herdrFor(runner)
+	herdr.CodexHome = "/state/codex-api-home"
+	rec := &Record{RunID: "r1", Model: "m", Effort: "high"}
+	if err := herdr.StartImplementer(context.Background(), rec, "/work", "task"); err != nil {
+		t.Fatal(err)
+	}
+	if runner.calls[0].Env[0] != "CODEX_HOME=/state/codex-api-home" {
+		t.Fatalf("mcp list env=%v", runner.calls[0].Env)
+	}
+	joined := strings.Join(runner.calls[1].Args, " ")
+	if !strings.Contains(joined, "-- /usr/bin/env CODEX_HOME=/state/codex-api-home /abs/codex -p agent-harness") {
+		t.Fatalf("args=%s", joined)
+	}
+}
+
+func TestStartImplementerKeepsDefaultHome(t *testing.T) {
+	runner := &scriptRunner{responses: map[string]response{"/abs/codex -p": {out: `[]`}}}
+	if err := herdrFor(runner).StartImplementer(context.Background(), &Record{RunID: "r1"}, "/work", "task"); err != nil {
+		t.Fatal(err)
+	}
+	if joined := strings.Join(runner.calls[1].Args, " "); strings.Contains(joined, "CODEX_HOME") {
+		t.Fatalf("args=%s", joined)
+	}
+}
+
+func TestWaitImplementerDetectsAPIBudgetExhaustion(t *testing.T) {
+	for _, screen := range []string{"insufficient_quota", "You exceeded your current quota, please check your plan"} {
+		runner := &scriptRunner{responses: map[string]response{
+			"hc wait": {out: `{"ended":false,"reason":"timeout"}`},
+			"hc read": {out: screen},
+		}}
+		outcome, _, err := herdrFor(runner).WaitImplementer(context.Background(), &Record{RunID: "r1"}, t.TempDir(), time.Minute)
+		if err != nil || outcome != ImplQuota {
+			t.Errorf("%q: outcome=%v err=%v", screen, outcome, err)
+		}
+	}
+}

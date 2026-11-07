@@ -41,6 +41,7 @@ type Record struct {
 	Agent            string      `json:"agent"`
 	Model            string      `json:"model"`
 	Effort           string      `json:"effort"`
+	CodexAuth        string      `json:"codex_auth,omitempty"`
 	ReviewerModel    string      `json:"reviewer_model"`
 	Status           Status      `json:"status"`
 	StopReason       string      `json:"stop_reason,omitempty"`

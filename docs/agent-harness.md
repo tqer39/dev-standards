@@ -33,6 +33,28 @@ bin/agent-harness run \
 | 4 | 人間の判断待ち | PR の `needs-human` と理由を確認する。auto-merge の待機が時間切れの場合、後でマージされても次の実行か `reconcile` で検証する |
 | 1 | その他の失敗 | 表示された内容を確認する |
 
+## API キーで実行する
+
+Codex の利用枠が尽きている間は、OpenAI の API キーで実行できる。従量課金なので、明示したときだけ使う。
+
+1. OpenAI で上限を設定した専用プロジェクトのキーを作り、1Password の Vault `agent-harness` の項目 `openai` のフィールド `api-key` に保存する。
+2. 人間が次を実行する。キーは 1Password から標準入力で渡され、画面に表示されない。
+
+```sh
+bin/agent-harness setup-api-key
+bin/agent-harness doctor --repo <owner>/<name> --codex-auth api-key
+```
+
+実行時は `run` に `--codex-auth api-key` を付ける。`resume` は記録された認証方式を使う。
+
+キーは `~/.local/state/agent-harness/codex-api-home/auth.json` に保存する。`~/.codex` の ChatGPT ログインと自律保守には影響しない。このセッションの記録は `~/.codex/sessions` に入らないので、`agent-telemetry` のセッションの集計には含まれない。
+
+使い終わったら次を実行し、OpenAI 側でキーを取り消す。
+
+```sh
+CODEX_HOME=~/.local/state/agent-harness/codex-api-home codex logout
+```
+
 ## 停止と再開
 
 main の CI が失敗すると、そのリポジトリの自動処理を止めて revert する。

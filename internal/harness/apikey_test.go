@@ -1,0 +1,64 @@
+//go:build !windows
+
+package harness
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestSetupAPIKeyPipesKeyOverStdinOnly(t *testing.T) {
+	const key = "sk-test-value"
+	home := filepath.Join(t.TempDir(), "codex-api-home")
+	runner := &scriptRunner{responses: map[string]response{}}
+	secrets := fakeSecrets{OpenAIKeyRef: key}
+	if err := SetupAPIKey(context.Background(), runner, secrets, "codex", home, []byte("profile\n")); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(home)
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("home mode=%v err=%v", info, err)
+	}
+	config, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil || !strings.Contains(string(config), `forced_login_method = "api"`) || !strings.Contains(string(config), `cli_auth_credentials_store = "file"`) {
+		t.Fatalf("config=%s err=%v", config, err)
+	}
+	if profile, err := os.ReadFile(filepath.Join(home, "agent-harness.config.toml")); err != nil || string(profile) != "profile\n" {
+		t.Fatalf("profile=%s err=%v", profile, err)
+	}
+	call := runner.calls[0]
+	if call.Stdin != key || call.Secrets[0] != key || call.Env[0] != "CODEX_HOME="+home {
+		t.Fatalf("call=%+v", call)
+	}
+	if strings.Contains(strings.Join(call.Args, " "), key) || strings.Contains(strings.Join(call.Env, " "), key) {
+		t.Fatalf("key leaked into args or env: %+v", call)
+	}
+	if strings.Join(call.Args, " ") != "login --with-api-key" {
+		t.Fatalf("args=%v", call.Args)
+	}
+}
+
+func TestSetupAPIKeyRejectsEmptyKey(t *testing.T) {
+	runner := &scriptRunner{responses: map[string]response{}}
+	err := SetupAPIKey(context.Background(), runner, fakeSecrets{}, "codex", filepath.Join(t.TempDir(), "h"), nil)
+	if err == nil || len(runner.calls) != 0 {
+		t.Fatalf("err=%v calls=%d", err, len(runner.calls))
+	}
+}
+
+func TestAPIKeyLoggedIn(t *testing.T) {
+	runner := &scriptRunner{responses: map[string]response{"codex login": {out: "Logged in using an API key - sk-***\n"}}}
+	if err := APIKeyLoggedIn(context.Background(), runner, "codex", "/h"); err != nil {
+		t.Fatal(err)
+	}
+	if runner.calls[0].Env[0] != "CODEX_HOME=/h" {
+		t.Fatalf("env=%v", runner.calls[0].Env)
+	}
+	runner = &scriptRunner{responses: map[string]response{"codex login": {out: "Logged in using ChatGPT\n"}}}
+	if err := APIKeyLoggedIn(context.Background(), runner, "codex", "/h"); err == nil {
+		t.Fatal("ChatGPT login must not count as API key login")
+	}
+}

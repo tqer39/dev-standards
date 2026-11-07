@@ -51,11 +51,13 @@ func main() {
 
 func dispatch(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("使い方: agent-harness <setup|doctor|run|resume|reconcile|clear-stop>")
+		return errors.New("使い方: agent-harness <setup|setup-api-key|doctor|run|resume|reconcile|clear-stop>")
 	}
 	switch args[0] {
 	case "setup":
 		return installProfile()
+	case "setup-api-key":
+		return setupAPIKey(out)
 	case "doctor":
 		return doctor(args[1:], out)
 	case "run":
@@ -76,6 +78,41 @@ func stateRoot() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".local", "state", "agent-harness"), nil
+}
+
+// codexHomeFor は認証方式に対応する Codex ホームを返す。空は既定の ~/.codex を表す。
+func codexHomeFor(auth string) (string, error) {
+	switch auth {
+	case "", "chatgpt":
+		return "", nil
+	case "api-key":
+		root, err := stateRoot()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(root, "codex-api-home"), nil
+	}
+	return "", fmt.Errorf("Codex の認証方式 %q は使えません", auth)
+}
+
+func setupAPIKey(out io.Writer) error {
+	home, err := codexHomeFor("api-key")
+	if err != nil {
+		return err
+	}
+	codex, err := resolve("codex")
+	if err != nil {
+		return err
+	}
+	runner := harness.OSRunner{}
+	if err := harness.SetupAPIKey(context.Background(), runner, harness.OPSecrets{Run: runner}, codex, home, harnessassets.CodexProfile); err != nil {
+		return err
+	}
+	if err := harness.APIKeyLoggedIn(context.Background(), runner, codex, home); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "API キーを %s に登録しました。~/.codex は変更していません。\n", home)
+	return nil
 }
 
 func installProfile() error {
@@ -109,7 +146,11 @@ func resolve(name string) (string, error) {
 	return filepath.Abs(path)
 }
 
-func build(repo string) (*harness.Orchestrator, error) {
+func build(repo, codexAuth string) (*harness.Orchestrator, error) {
+	codexHome, err := codexHomeFor(codexAuth)
+	if err != nil {
+		return nil, err
+	}
 	root, err := stateRoot()
 	if err != nil {
 		return nil, err
@@ -148,7 +189,7 @@ func build(repo string) (*harness.Orchestrator, error) {
 	}
 	return &harness.Orchestrator{
 		Store:  harness.Store{Root: root},
-		Agents: &harness.Herdr{Run: runner, HC: paths["hc"], Codex: paths["codex"], Claude: paths["claude"], Poll: 5 * time.Second},
+		Agents: &harness.Herdr{Run: runner, HC: paths["hc"], Codex: paths["codex"], Claude: paths["claude"], Poll: 5 * time.Second, CodexHome: codexHome},
 		Tree:   tree,
 		Forge:  &harness.GitHub{Run: runner, Tokens: tokens, Repo: repo, Poll: 15 * time.Second},
 		Scanner: harness.Gitleaks{
@@ -174,6 +215,7 @@ func runCommand(args []string, out io.Writer) error {
 	agent := flags.String("agent", "codex", "実装担当")
 	model := flags.String("model", "gpt-6.1-sol", "モデル")
 	effort := flags.String("effort", "medium", "エフォート")
+	codexAuth := flags.String("codex-auth", "chatgpt", "Codex の認証: chatgpt, api-key（従量課金）")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -211,12 +253,13 @@ func runCommand(args []string, out io.Writer) error {
 			return err
 		}
 	}
-	orchestrator, err := build(*repo)
+	orchestrator, err := build(*repo, *codexAuth)
 	if err != nil {
 		return err
 	}
 	rec := &harness.Record{
-		RunID: harness.NewRunID(time.Now()), Repo: *repo, Base: *base, Title: *title, Kind: *kind,
+		CodexAuth: *codexAuth,
+		RunID:     harness.NewRunID(time.Now()), Repo: *repo, Base: *base, Title: *title, Kind: *kind,
 		Task: strings.TrimSpace(string(task)), Criteria: strings.TrimSpace(string(criteria)),
 		Agent: selected.Agent, Model: selected.Model, Effort: selected.Effort, ReviewerModel: selected.Reviewer,
 		Status: harness.StatusImplementing,
@@ -248,7 +291,8 @@ func resumeCommand(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	orchestrator, err := build(rec.Repo)
+	// 再開でも同じ認証を使う。別の方式に切り替えると課金先が変わるためである。
+	orchestrator, err := build(rec.Repo, rec.CodexAuth)
 	if err != nil {
 		return err
 	}
@@ -261,7 +305,7 @@ func reconcileCommand(args []string, out io.Writer) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	orchestrator, err := build(*repo)
+	orchestrator, err := build(*repo, "")
 	if err != nil {
 		return err
 	}
@@ -307,6 +351,7 @@ func claudeLoggedIn(status string) error {
 func doctor(args []string, out io.Writer) error {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	repo := flags.String("repo", "", "owner/name")
+	codexAuth := flags.String("codex-auth", "chatgpt", "Codex の認証: chatgpt, api-key")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -327,6 +372,13 @@ func doctor(args []string, out io.Writer) error {
 		check(name, err)
 	}
 	check("Codex の権限プロファイル", installProfile())
+	codexHome, err := codexHomeFor(*codexAuth)
+	if err == nil && codexHome != "" {
+		err = harness.APIKeyLoggedIn(context.Background(), harness.OSRunner{}, "codex", codexHome)
+	}
+	if *codexAuth != "chatgpt" {
+		check("Codex の API キー", err)
+	}
 	status, err := harness.OSRunner{}.Run(context.Background(), harness.Cmd{Name: "claude", Args: []string{"auth", "status"}})
 	if err == nil {
 		err = claudeLoggedIn(status)

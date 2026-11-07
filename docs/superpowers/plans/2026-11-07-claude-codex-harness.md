@@ -3,6 +3,8 @@
 <!-- Go のコード例はタブが正しい形式で、番号付きの手順はコード例をはさんで続くので除外する。 -->
 <!-- markdownlint-disable MD010 MD029 -->
 
+> **実装後の注記:** 実装中とレビューで変更した箇所があります。コードと仕様書を正とし、この計画は当時の手順の記録として読んでください。
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 受入条件の承認後に、Codex の実装、Claude のレビュー、SHA を固定した auto-merge、失敗時の revert までを無人で進める `agent-harness` CLI を作り、`tqer39/agent-telemetry` で初期運用する。
@@ -227,6 +229,7 @@ Expected: 信頼確認で止まらず、`hello.txt` が `ok` になる。Codex 0
 ```text
 curl -sS -m 10 -o /dev/null https://api.github.com/
 test -r ~/.config/gh/hosts.yml
+test -r ~/.local/state/agent-harness/codex-api-home/auth.json
 gh auth status
 ```
 
