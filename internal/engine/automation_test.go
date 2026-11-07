@@ -199,7 +199,7 @@ func TestAutomationCheckoutKeepsCanonicalLineEndings(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	run("checkout", "HEAD", "--", "AGENTS.md", ".codex/hooks.json", ".standards/rules.md", ".github/workflows/dev-standards.yml")
+	run("checkout", "HEAD", "--", "AGENTS.md", ".codex/hooks.json", ".standards/rules.md", ".github/workflows/dev-standards.yml", versionLagWorkflowPath)
 	p, err = tree.Plan(Request{Mode: "upgrade", Automation: true})
 	if err != nil {
 		t.Fatal(err)

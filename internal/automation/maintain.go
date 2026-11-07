@@ -488,7 +488,7 @@ func guardProject(dir string, paths []string, c Config, cfg []byte) error {
 			owned := s.Files[p].Exists
 			allowed = owned && ((p == "AGENTS.md" && m.AI.Instructions != "rulesync") || (p == ".rulesync/rules/dev-standards.md" && m.AI.Instructions == "rulesync"))
 		}
-		for _, name := range []string{".codex/hooks.json", ".editorconfig", ".gitignore", ".gitattributes", "mise.toml", ".github/workflows/dev-standards.yml"} {
+		for _, name := range []string{".codex/hooks.json", ".editorconfig", ".gitignore", ".gitattributes", "mise.toml", ".github/workflows/dev-standards.yml", ".github/workflows/dev-standards-version-lag.yml"} {
 			allowed = allowed || p == name
 		}
 		if !allowed {
