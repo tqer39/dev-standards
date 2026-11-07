@@ -15,9 +15,10 @@ import (
 )
 
 type Change struct {
-	Status byte
-	Mode   string
-	Path   string
+	Status  byte
+	OldMode string
+	Mode    string
+	Path    string
 }
 
 type Finding struct {
@@ -49,11 +50,12 @@ func DefaultPolicy() Policy {
 	}}
 }
 
-var testPath = regexp.MustCompile(`(^|/)(tests?|__tests__|spec)/|_test\.go$|\.(test|spec)\.[jt]sx?$|(^|/)test_[^/]*\.py$`)
+var testPath = regexp.MustCompile(`(^|/)(tests?|__tests__|spec)/|_test\.go$|\.(test|spec)\.[jt]sx?$|(^|/)test_[^/]*\.py$|_test\.py$`)
 
 func globRegexp(pattern string) *regexp.Regexp {
 	var b strings.Builder
-	b.WriteString("(?i)^")
+	// ファイル名の改行で停止パスをすり抜けないよう、. を改行にも一致させる。
+	b.WriteString("(?is)^")
 	for i := 0; i < len(pattern); {
 		switch {
 		case strings.HasPrefix(pattern[i:], "**/"):
@@ -87,7 +89,7 @@ func Evaluate(changes []Change, policy Policy, pinned []string) []Finding {
 		switch {
 		case slices.Contains(pinned, change.Path):
 			reason = "固定した受入テストの変更"
-		case change.Mode == "120000" || change.Mode == "160000":
+		case isLinkMode(change.OldMode) || isLinkMode(change.Mode):
 			reason = "シンボリックリンクまたはサブモジュールの変更"
 		case change.Status == 'D' && testPath.MatchString(change.Path):
 			reason = "テストの削除"
@@ -106,6 +108,8 @@ func Evaluate(changes []Change, policy Policy, pinned []string) []Finding {
 	return findings
 }
 
+func isLinkMode(mode string) bool { return mode == "120000" || mode == "160000" }
+
 // ParseRaw は git diff --raw --no-renames -z の出力を解釈する。
 func ParseRaw(raw string) ([]Change, error) {
 	parts := strings.Split(strings.TrimSuffix(raw, "\x00"), "\x00")
@@ -121,11 +125,12 @@ func ParseRaw(raw string) ([]Change, error) {
 		if len(fields) != 5 || !strings.HasPrefix(fields[0], ":") || fields[4] == "" {
 			return nil, fmt.Errorf("git diff --raw の行が不正です: %q", parts[i])
 		}
+		oldMode := strings.TrimPrefix(fields[0], ":")
 		mode := fields[1]
 		if fields[4][0] == 'D' {
-			mode = strings.TrimPrefix(fields[0], ":")
+			mode = oldMode
 		}
-		changes = append(changes, Change{Status: fields[4][0], Mode: mode, Path: parts[i+1]})
+		changes = append(changes, Change{Status: fields[4][0], OldMode: oldMode, Mode: mode, Path: parts[i+1]})
 	}
 	return changes, nil
 }

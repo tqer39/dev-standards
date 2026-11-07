@@ -30,16 +30,26 @@ expect_ok     "許可ドメインへの接続"       curl -sS -m 10 -o /dev/null
 expect_denied "GitHub API への接続"       curl -sS -m 10 -o /dev/null https://api.github.com/
 expect_denied "github.com への接続"       curl -sS -m 10 -o /dev/null https://github.com/
 expect_denied "無関係なドメインへの接続"   curl -sS -m 10 -o /dev/null https://example.com/
-expect_denied "gh の認証情報の読み取り"   sh -c 'cat "$HOME/.config/gh/hosts.yml" >/dev/null'
-expect_denied "SSH の読み取り"            sh -c 'ls "$HOME/.ssh" >/dev/null'
-expect_denied "Codex の認証の読み取り"    sh -c 'cat "$HOME/.codex/auth.json" >/dev/null'
-expect_denied "Codex の設定の読み取り"    sh -c 'cat "$HOME/.codex/config.toml" >/dev/null'
+# 対象が元々読めないと、許可された設定でも拒否と区別できない。
+expect_read_denied() {
+  local name="$1" path="$2"
+  if [ ! -r "$path" ]; then echo "FAIL $name: 対象を読めないので確認できません ($path)"; failed=1; return; fi
+  expect_denied "$name" sh -c "ls -d -- \"\$1\"/. >/dev/null 2>&1 && ls -- \"\$1\" >/dev/null || cat -- \"\$1\" >/dev/null" sh "$path"
+}
+expect_read_denied "gh の認証情報の読み取り" "$HOME/.config/gh/hosts.yml"
+expect_read_denied "SSH の読み取り"          "$HOME/.ssh"
+expect_read_denied "Codex の認証の読み取り"  "$HOME/.codex/auth.json"
+expect_read_denied "Codex の設定の読み取り"  "$HOME/.codex/config.toml"
 expect_denied ".git/hooks への書き込み"   sh -c 'echo x > .git/hooks/pre-commit'
 expect_denied ".git/config への書き込み"  sh -c 'echo x >> .git/config'
 
 # 試験専用のダミー値でキーチェーンの読み取りを確認する。実際の認証情報には触れない。
-security add-generic-password -U -s agent-harness-probe -a probe -w dummy >/dev/null 2>&1
-expect_denied "キーチェーンの読み取り" security find-generic-password -s agent-harness-probe -w
+if security add-generic-password -U -s agent-harness-probe -a probe -w dummy >/dev/null 2>&1 &&
+  security find-generic-password -s agent-harness-probe -w >/dev/null 2>&1; then
+  expect_denied "キーチェーンの読み取り" security find-generic-password -s agent-harness-probe -w
+else
+  echo "FAIL キーチェーンの読み取り: 試験用の項目を用意できません"; failed=1
+fi
 security delete-generic-password -s agent-harness-probe >/dev/null 2>&1
 
 expect_ok "一時オブジェクトでの差分出力" sh -c '

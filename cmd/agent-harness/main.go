@@ -89,7 +89,7 @@ func installProfile() error {
 		if bytes.Equal(existing, harnessassets.CodexProfile) {
 			return nil
 		}
-		return fmt.Errorf("%s は内容が異なるので上書きしません", path)
+		return fmt.Errorf("%s は内容が異なるので上書きしません。新しい版を導入するには、内容を確認してから `mv %s %s.bak` で退避し、`agent-harness setup` を再実行してください", path, path, path)
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -197,6 +197,12 @@ func runCommand(args []string, out io.Writer) error {
 	criteria, err := os.ReadFile(*criteriaFile)
 	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(string(task)) == "" {
+		return errors.New("タスクの説明が空です")
+	}
+	if strings.TrimSpace(string(criteria)) == "" {
+		return errors.New("受入条件が空です")
 	}
 	var acceptance []byte
 	if *acceptancePatch != "" {

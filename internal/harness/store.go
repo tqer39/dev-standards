@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -22,6 +21,7 @@ const (
 	StatusImplementing    Status = "implementing"
 	StatusWaitingQuota    Status = "waiting_quota"
 	StatusStopped         Status = "stopped"
+	StatusMergeArmed      Status = "merge_armed"
 	StatusMergedUnchecked Status = "merged_unchecked"
 	StatusCompleted       Status = "completed"
 	StatusReverted        Status = "reverted"
@@ -52,6 +52,7 @@ type Record struct {
 	HeadSHA          string      `json:"head_sha,omitempty"`
 	MergeSHA         string      `json:"merge_sha,omitempty"`
 	RevertPR         int         `json:"revert_pr,omitempty"`
+	RevertSHA        string      `json:"revert_sha,omitempty"`
 	FirstRoundPassed bool        `json:"first_round_passed"`
 	StartedAt        time.Time   `json:"started_at"`
 	UpdatedAt        time.Time   `json:"updated_at"`
@@ -69,7 +70,8 @@ func NewRunID(now time.Time) string {
 
 func (s Store) runPath(id string) string { return filepath.Join(s.Root, "runs", id+".json") }
 
-func repoKey(repo string) string { return strings.ReplaceAll(repo, "/", "__") }
+// repoKey は大文字と小文字を区別しない。GitHub では同じリポジトリを指すためである。
+func repoKey(repo string) string { return strings.ReplaceAll(strings.ToLower(repo), "/", "__") }
 
 func (s Store) lockPath(repo string) string {
 	return filepath.Join(s.Root, "locks", repoKey(repo)+".lock")
@@ -141,35 +143,25 @@ func (s Store) List(status Status) ([]*Record, error) {
 	return records, nil
 }
 
-// Lock は 1 リポジトリ 1 タスクの排他を取る。保持者が死んでいれば回収する。
+// Lock は 1 リポジトリ 1 タスクの排他を取る。
+// flock はプロセスの終了時にカーネルが解放するので、古いロックを回収する競合が起きない。
 func (s Store) Lock(repo string) (func(), error) {
 	path := s.lockPath(repo)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	for attempt := 0; attempt < 2; attempt++ {
-		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err == nil {
-			fmt.Fprint(file, os.Getpid())
-			file.Close()
-			return func() { os.Remove(path) }, nil
-		}
-		if !errors.Is(err, os.ErrExist) {
-			return nil, err
-		}
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return nil, readErr
-		}
-		pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
-		if parseErr == nil && pid > 0 && syscall.Kill(pid, 0) == nil {
-			return nil, fmt.Errorf("%s は別の実行 (pid %d) が処理中です", repo, pid)
-		}
-		if err := os.Remove(path); err != nil {
-			return nil, err
-		}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("%s の排他を取得できません", repo)
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		file.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, fmt.Errorf("%s は別の実行が処理中です", repo)
+		}
+		return nil, err
+	}
+	return func() { file.Close() }, nil
 }
 
 func (s Store) Stopped(repo string) (string, error) {

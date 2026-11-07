@@ -54,6 +54,7 @@ type Forge interface {
 	UnresolvedThreads(context.Context, int) ([]ReviewThread, error)
 	ResolveThread(context.Context, string) error
 	WaitExternalReview(context.Context, string, string, time.Duration) error
+	PullRequestMerge(context.Context, int) (string, string, error)
 }
 
 type Scanner interface {
@@ -78,16 +79,25 @@ func (o *Orchestrator) Run(ctx context.Context, rec *Record, acceptance []byte, 
 	if !humanApproved {
 		return errors.New("受入条件が人間に承認されていません")
 	}
-	// Mac の停止などで確認できなかったマージを先に処理する。失敗していれば停止する。
-	if err := o.Reconcile(ctx, rec.Repo); err != nil {
-		return err
+	if len(CriteriaItems(rec.Criteria)) == 0 {
+		return errors.New("受入条件が空です")
 	}
-	unlock, err := o.enter(rec.Repo)
+	unlock, err := o.enter(ctx, rec.Repo)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 	rec.StartedAt = time.Now().UTC()
+	if len(acceptance) > 0 {
+		// 受入テストの差分もコミットして公開するので、先に検査する。
+		leak, err := o.Scanner.Scan(ctx, acceptance)
+		if err != nil {
+			return err
+		}
+		if leak {
+			return o.stopLocal(rec, "受入テストの差分から秘密情報を検出しました。")
+		}
+	}
 	paths, err := o.Tree.Prepare(ctx, rec, acceptance)
 	if err != nil {
 		return err
@@ -103,10 +113,11 @@ func (o *Orchestrator) Run(ctx context.Context, rec *Record, acceptance []byte, 
 
 // Resume は利用枠の解除後に同じプロファイルで再開する。
 func (o *Orchestrator) Resume(ctx context.Context, rec *Record) error {
-	if rec.Status != StatusWaitingQuota {
+	// implementing は起動の失敗や中断で残った実行である。排他を取れれば再開できる。
+	if rec.Status != StatusWaitingQuota && rec.Status != StatusImplementing {
 		return fmt.Errorf("%s は再開できる状態ではありません: %s", rec.RunID, rec.Status)
 	}
-	unlock, err := o.enter(rec.Repo)
+	unlock, err := o.enter(ctx, rec.Repo)
 	if err != nil {
 		return err
 	}
@@ -128,15 +139,26 @@ func (o *Orchestrator) Resume(ctx context.Context, rec *Record) error {
 	return o.loop(ctx, rec, paths)
 }
 
-func (o *Orchestrator) enter(repo string) (func(), error) {
-	reason, err := o.Store.Stopped(repo)
+// enter は排他を取り、未確認のマージを処理してから停止フラグを確認する。
+func (o *Orchestrator) enter(ctx context.Context, repo string) (func(), error) {
+	unlock, err := o.Store.Lock(repo)
 	if err != nil {
 		return nil, err
 	}
+	if err := o.reconcile(ctx, repo); err != nil {
+		unlock()
+		return nil, err
+	}
+	reason, err := o.Store.Stopped(repo)
+	if err != nil {
+		unlock()
+		return nil, err
+	}
 	if reason != "" {
+		unlock()
 		return nil, fmt.Errorf("%s の自動処理は停止中です: %s", repo, reason)
 	}
-	return o.Store.Lock(repo)
+	return unlock, nil
 }
 
 func (o *Orchestrator) loop(ctx context.Context, rec *Record, paths Paths) error {
@@ -220,7 +242,7 @@ func (o *Orchestrator) round(ctx context.Context, rec *Record, paths Paths) (str
 		return "", err
 	}
 	if err := o.Tree.Push(ctx, rec, sha); err != nil {
-		return "", err
+		return "", o.stop(ctx, rec, "ブランチを更新できません: "+err.Error())
 	}
 	rec.HeadSHA = sha
 	if rec.PR == 0 {
@@ -305,6 +327,12 @@ func (o *Orchestrator) review(ctx context.Context, rec *Record, paths Paths, con
 		_ = o.Forge.SetStatus(ctx, sha, "failure", "判定が不正です")
 		return "", o.stop(ctx, rec, "レビューの判定が不正です: "+err.Error())
 	}
+	if missing := verdict.MissingCriteria(rec.Criteria); len(missing) > 0 {
+		if err := o.Forge.SetStatus(ctx, sha, "failure", "判定されていない受入条件があります"); err != nil {
+			return "", err
+		}
+		return "", o.stop(ctx, rec, "レビューが判定しなかった受入条件があります。\n\n- "+strings.Join(missing, "\n- "))
+	}
 	switch verdict.Decide() {
 	case DecisionStop:
 		if err := o.Forge.SetStatus(ctx, sha, "failure", verdict.Reason); err != nil {
@@ -363,11 +391,22 @@ func (o *Orchestrator) merge(ctx context.Context, rec *Record, config RepoConfig
 	if err := o.Forge.ArmMerge(ctx, rec.PR, rec.HeadSHA); err != nil {
 		return o.stop(ctx, rec, "auto-merge を有効にできません: "+err.Error())
 	}
+	// 待機の後にマージされても検証できるよう、先に記録する。
+	rec.Status = StatusMergeArmed
+	if err := o.Store.Save(rec); err != nil {
+		return err
+	}
 	mergeCtx, cancel := context.WithTimeout(ctx, o.MergeLimit)
 	defer cancel()
 	sha, err := o.Forge.WaitMerged(mergeCtx, rec.PR, rec.HeadSHA)
 	if err != nil {
-		return o.stop(ctx, rec, "マージを確認できません: "+err.Error())
+		reason := "マージを確認できません: " + err.Error()
+		rec.StopReason = reason
+		markErr := o.Forge.MarkNeedsHuman(ctx, rec.PR, reason)
+		if saveErr := o.Store.Save(rec); saveErr != nil {
+			return errors.Join(saveErr, markErr)
+		}
+		return errors.Join(fmt.Errorf("%w: %s", ErrStopped, reason), markErr)
 	}
 	rec.MergeSHA = sha
 	rec.Status = StatusMergedUnchecked
@@ -391,21 +430,27 @@ func (o *Orchestrator) checkMain(ctx context.Context, rec *Record, config RepoCo
 	if err := o.Store.SetStop(rec.Repo, reason); err != nil {
 		return err
 	}
-	branch, sha, err := o.Tree.Revert(ctx, rec)
-	if err != nil {
-		return o.stop(ctx, rec, reason+"。revert を作成できません: "+err.Error())
+	// 作成済みの revert PR があれば、中断後はそこから再開する。
+	if rec.RevertPR == 0 {
+		branch, sha, err := o.Tree.Revert(ctx, rec)
+		if err != nil {
+			return o.stop(ctx, rec, reason+"。revert を作成できません: "+err.Error())
+		}
+		number, err := o.Forge.CreatePR(ctx, branch, rec.Base, "revert: "+rec.Title, "main の CI が失敗したので、自動で元に戻します。\n\n対象: #"+fmt.Sprint(rec.PR))
+		if err != nil {
+			return o.stop(ctx, rec, reason+"。revert PR を作成できません: "+err.Error())
+		}
+		rec.RevertPR, rec.RevertSHA = number, sha
+		if err := o.Store.Save(rec); err != nil {
+			return err
+		}
 	}
-	number, err := o.Forge.CreatePR(ctx, branch, rec.Base, "revert: "+rec.Title, "main の CI が失敗したので、自動で元に戻します。\n\n対象: #"+fmt.Sprint(rec.PR))
-	if err != nil {
-		return err
-	}
-	rec.RevertPR = number
-	if err := o.Forge.ArmMerge(ctx, number, sha); err != nil {
+	if err := o.Forge.ArmMerge(ctx, rec.RevertPR, rec.RevertSHA); err != nil {
 		return o.stop(ctx, rec, reason+"。revert の auto-merge を有効にできません: "+err.Error())
 	}
 	mergeCtx, cancel := context.WithTimeout(ctx, o.MergeLimit)
 	defer cancel()
-	if _, err := o.Forge.WaitMerged(mergeCtx, number, sha); err != nil {
+	if _, err := o.Forge.WaitMerged(mergeCtx, rec.RevertPR, rec.RevertSHA); err != nil {
 		return o.stop(ctx, rec, reason+"。revert を確認できません: "+err.Error())
 	}
 	rec.Status = StatusReverted
@@ -418,23 +463,59 @@ func (o *Orchestrator) checkMain(ctx context.Context, rec *Record, config RepoCo
 
 // Reconcile は Mac の停止などで確認できなかったマージを処理する。
 func (o *Orchestrator) Reconcile(ctx context.Context, repo string) error {
-	records, err := o.Store.List(StatusMergedUnchecked)
+	unlock, err := o.Store.Lock(repo)
 	if err != nil {
 		return err
 	}
-	for _, rec := range records {
-		if rec.Repo != repo {
-			continue
-		}
-		config, err := o.Config(o.Tree.PathsFor(rec).Review)
+	defer unlock()
+	return o.reconcile(ctx, repo)
+}
+
+// reconcile は排他を取った状態で呼ぶ。
+func (o *Orchestrator) reconcile(ctx context.Context, repo string) error {
+	for _, status := range []Status{StatusMergeArmed, StatusMergedUnchecked} {
+		records, err := o.Store.List(status)
 		if err != nil {
 			return err
 		}
-		if err := o.checkMain(ctx, rec, config); err != nil {
-			return err
+		for _, rec := range records {
+			if !strings.EqualFold(rec.Repo, repo) {
+				continue
+			}
+			if err := o.reconcileRecord(ctx, rec); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+func (o *Orchestrator) reconcileRecord(ctx context.Context, rec *Record) error {
+	if rec.Status == StatusMergeArmed {
+		state, sha, err := o.Forge.PullRequestMerge(ctx, rec.PR)
+		if err != nil {
+			return err
+		}
+		switch state {
+		case "MERGED":
+			rec.MergeSHA = sha
+			rec.Status = StatusMergedUnchecked
+			if err := o.Store.Save(rec); err != nil {
+				return err
+			}
+		case "CLOSED":
+			rec.Status = StatusStopped
+			rec.StopReason = fmt.Sprintf("PR #%d がマージされずに閉じられました", rec.PR)
+			return o.Store.Save(rec)
+		default:
+			return nil
+		}
+	}
+	config, err := o.Config(o.Tree.PathsFor(rec).Review)
+	if err != nil {
+		return err
+	}
+	return o.checkMain(ctx, rec, config)
 }
 
 func (o *Orchestrator) waitQuota(rec *Record) error {
@@ -531,7 +612,7 @@ func reviewPrompt(rec *Record, sha, diffPath string) string {
 %s
 ## 判定
 
-- 受入条件ごとに達成を判定し、criteria に記録してください。
+- 受入条件の各行を criteria に 1 件ずつ記録し、criterion には行の文章を一字一句そのまま写してください。省略すると不合格として扱います。
 - 不具合、回帰、テストの弱体化を findings に記録してください。
 - 入力検証の欠落、権限の問題、秘密情報の露出、検査の回避を security_findings に記録してください。
 - 問題がなければ approved を true にしてください。テストの合格だけで意図の妥当性を推測しないでください。

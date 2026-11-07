@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
 
 // Result は実装担当の完了の申告である。信用せず、差分と検査で確認する。
@@ -78,6 +80,39 @@ func (v Verdict) Decide() Decision {
 		}
 	}
 	return DecisionPass
+}
+
+var listMarker = regexp.MustCompile(`^(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)`)
+
+func normalizeCriterion(line string) string {
+	line = strings.TrimSpace(line)
+	return strings.TrimSpace(listMarker.ReplaceAllString(line, ""))
+}
+
+// CriteriaItems は受入条件を 1 行 1 条件として取り出す。
+func CriteriaItems(text string) []string {
+	var items []string
+	for _, line := range strings.Split(text, "\n") {
+		if item := normalizeCriterion(line); item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+// MissingCriteria はレビューで判定されなかった受入条件を返す。省略による合格を防ぐ。
+func (v Verdict) MissingCriteria(text string) []string {
+	judged := map[string]bool{}
+	for _, criterion := range v.Criteria {
+		judged[normalizeCriterion(criterion.Criterion)] = true
+	}
+	var missing []string
+	for _, item := range CriteriaItems(text) {
+		if !judged[item] {
+			missing = append(missing, item)
+		}
+	}
+	return missing
 }
 
 func ParseVerdict(data []byte, wantSHA string) (Verdict, error) {

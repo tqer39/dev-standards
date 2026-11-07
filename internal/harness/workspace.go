@@ -244,10 +244,19 @@ func (t *GitTree) Commit(ctx context.Context, rec *Record) (string, error) {
 
 // Push はハーネス専用ブランチを更新する。他者の更新は lease で検出する。
 func (t *GitTree) Push(ctx context.Context, rec *Record, sha string) error {
+	ref := "refs/heads/agent/" + rec.RunID
 	if sha == rec.HeadSHA {
+		// 差分が同じでも、ブランチが変更されていれば以前の検証結果は使えない。
+		out, err := t.authGit(ctx, t.PathsFor(rec).Trusted, "ls-remote", "origin", ref)
+		if err != nil {
+			return err
+		}
+		fields := strings.Fields(out)
+		if len(fields) == 0 || fields[0] != sha {
+			return fmt.Errorf("%s の先頭が変更されています", ref)
+		}
 		return nil
 	}
-	ref := "refs/heads/agent/" + rec.RunID
 	_, err := t.authGit(ctx, t.PathsFor(rec).Trusted, "push",
 		"--force-with-lease="+ref+":"+rec.HeadSHA, "origin", sha+":"+ref)
 	return err
@@ -274,7 +283,8 @@ func (t *GitTree) Revert(ctx context.Context, rec *Record) (string, string, erro
 	}
 	sha := strings.TrimSpace(head)
 	branch := "agent/revert-" + rec.RunID
-	if _, err := t.authGit(ctx, trusted, "push", "origin", sha+":refs/heads/"+branch); err != nil {
+	// ハーネス専用のブランチなので、中断後の再実行では作り直す。
+	if _, err := t.authGit(ctx, trusted, "push", "origin", "+"+sha+":refs/heads/"+branch); err != nil {
 		return "", "", err
 	}
 	return branch, sha, nil

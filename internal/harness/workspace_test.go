@@ -219,3 +219,71 @@ func TestRevertCreatesBranch(t *testing.T) {
 		t.Fatalf("app.txt=%q", got)
 	}
 }
+
+func TestPushVerifiesRemoteWhenReusingSHA(t *testing.T) {
+	remote := newRemote(t)
+	tree, rec := newTree(t, remote)
+	ctx := context.Background()
+	paths, err := tree.Prepare(ctx, rec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.Work, "new.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch, err := tree.Export(ctx, paths.Work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Apply(ctx, rec, patch); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := tree.Commit(ctx, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Push(ctx, rec, sha); err != nil {
+		t.Fatal(err)
+	}
+	rec.HeadSHA = sha
+	if err := tree.Push(ctx, rec, sha); err != nil {
+		t.Fatalf("unchanged remote: %v", err)
+	}
+	gitIn(t, remote, "update-ref", "refs/heads/agent/r1", rec.BaseSHA)
+	if err := tree.Push(ctx, rec, sha); err == nil {
+		t.Fatal("changed remote branch was ignored")
+	}
+}
+
+func TestRevertCanBeRepeatedAfterMainMoves(t *testing.T) {
+	remote := newRemote(t)
+	tree, rec := newTree(t, remote)
+	ctx := context.Background()
+	if _, err := tree.Prepare(ctx, rec, nil); err != nil {
+		t.Fatal(err)
+	}
+	seed := filepath.Join(filepath.Dir(remote), "seed")
+	if err := os.WriteFile(filepath.Join(seed, "app.txt"), []byte("bad\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, seed, "add", "-A")
+	gitIn(t, seed, "commit", "-q", "-m", "bad")
+	gitIn(t, seed, "push", "-q", "origin", "main")
+	rec.MergeSHA = gitIn(t, seed, "rev-parse", "HEAD")
+	if _, _, err := tree.Revert(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seed, "other.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, seed, "add", "-A")
+	gitIn(t, seed, "commit", "-q", "-m", "other")
+	gitIn(t, seed, "push", "-q", "origin", "main")
+	branch, sha, err := tree.Revert(ctx, rec)
+	if err != nil {
+		t.Fatalf("second revert: %v", err)
+	}
+	if gitIn(t, remote, "rev-parse", "refs/heads/"+branch) != sha {
+		t.Fatal("branch was not updated")
+	}
+}

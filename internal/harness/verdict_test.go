@@ -5,6 +5,7 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -67,5 +68,21 @@ func TestReadResultMatchesRunAndRound(t *testing.T) {
 	result, ok, err := ReadResult(dir, "r1", 0)
 	if !ok || err != nil || result.Status != "done" {
 		t.Fatalf("result=%+v ok=%v err=%v", result, ok, err)
+	}
+}
+
+func TestCriteriaItemsNormalizeListMarkers(t *testing.T) {
+	got := CriteriaItems("- 条件A\n\n* 条件B\n1. 条件C\n- [ ] 条件D\n  条件E  ")
+	want := []string{"条件A", "条件B", "条件C", "条件D", "条件E"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("got=%v", got)
+	}
+}
+
+func TestMissingCriteria(t *testing.T) {
+	verdict := Verdict{Criteria: []Criterion{{Criterion: "- 条件A", Met: true}}}
+	missing := verdict.MissingCriteria("- 条件A\n- 条件B")
+	if len(missing) != 1 || missing[0] != "条件B" {
+		t.Fatalf("missing=%v", missing)
 	}
 }

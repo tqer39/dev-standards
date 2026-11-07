@@ -100,3 +100,19 @@ func TestRecordJSONKeysAreStableForTelemetry(t *testing.T) {
 		}
 	}
 }
+
+func TestRepoKeysIgnoreCase(t *testing.T) {
+	store := Store{Root: t.TempDir()}
+	if err := store.SetStop("Owner/Name", "stop"); err != nil {
+		t.Fatal(err)
+	}
+	if reason, _ := store.Stopped("owner/name"); reason != "stop" {
+		t.Fatalf("reason=%q", reason)
+	}
+	if _, err := store.Lock("Owner/Name"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Lock("owner/NAME"); err == nil {
+		t.Fatal("lock must not depend on case")
+	}
+}

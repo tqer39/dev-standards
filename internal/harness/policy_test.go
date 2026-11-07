@@ -118,3 +118,31 @@ func TestLoadRepoConfigDefaults(t *testing.T) {
 		t.Fatalf("config=%+v", config)
 	}
 }
+
+func TestEvaluateStopsPythonSuffixTestDeletion(t *testing.T) {
+	got := Evaluate([]Change{{Status: 'D', Mode: "100644", Path: "src/report_test.py"}}, Policy{}, nil)
+	if len(got) != 1 {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestEvaluateStopsLinkReplacedByFile(t *testing.T) {
+	got := Evaluate([]Change{{Status: 'T', OldMode: "120000", Mode: "100644", Path: "link"}}, Policy{}, nil)
+	if len(got) != 1 {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestParseRawKeepsOldMode(t *testing.T) {
+	changes, err := ParseRaw(":120000 100644 aaa bbb T\x00link\x00")
+	if err != nil || changes[0].OldMode != "120000" || changes[0].Mode != "100644" {
+		t.Fatalf("changes=%+v err=%v", changes, err)
+	}
+}
+
+func TestStopPathsMatchNewlines(t *testing.T) {
+	got := Evaluate([]Change{{Status: 'M', Mode: "100644", Path: ".github/workflows/ci\nextra.yml"}}, DefaultPolicy(), nil)
+	if len(got) != 1 {
+		t.Fatalf("got=%+v", got)
+	}
+}

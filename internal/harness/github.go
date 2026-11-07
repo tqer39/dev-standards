@@ -129,6 +129,28 @@ func (g *GitHub) WaitMerged(ctx context.Context, pr int, sha string) (string, er
 	}
 }
 
+// PullRequestMerge は PR の状態とマージコミットを返す。待機後のマージの追跡に使う。
+func (g *GitHub) PullRequestMerge(ctx context.Context, pr int) (string, string, error) {
+	out, err := g.gh(ctx, "pr", "view", strconv.Itoa(pr), "--repo", g.Repo, "--json", "state,mergeCommit")
+	if err != nil {
+		return "", "", err
+	}
+	var state struct {
+		State       string `json:"state"`
+		MergeCommit *struct {
+			OID string `json:"oid"`
+		} `json:"mergeCommit"`
+	}
+	if err := json.Unmarshal([]byte(out), &state); err != nil {
+		return "", "", err
+	}
+	sha := ""
+	if state.MergeCommit != nil {
+		sha = state.MergeCommit.OID
+	}
+	return state.State, sha, nil
+}
+
 func (g *GitHub) MarkNeedsHuman(ctx context.Context, pr int, reason string) error {
 	if _, err := g.gh(ctx, "label", "create", "needs-human", "--repo", g.Repo, "--force", "--description", "ハーネスが人間の判断を待っています"); err != nil {
 		return err

@@ -116,3 +116,56 @@ func TestLoadRepoConfigExternalReviewDefaults(t *testing.T) {
 		t.Fatalf("config=%+v", config)
 	}
 }
+
+func TestClassifyInspectsRepliesOnFedThreads(t *testing.T) {
+	config := RepoConfig{ExternalReviewAuthors: []string{"coderabbitai"}}
+	fed := []FedThread{{ID: "old", Text: "x"}}
+	human := rabbit("old", "直す")
+	human.Replies = []ThreadComment{{Author: "tqer39", Body: "これは直さないで"}}
+	if got := classifyThreads([]ReviewThread{human}, config, fed); got.StopReason == "" {
+		t.Fatal("a human reply on a fed thread must stop")
+	}
+	edited := rabbit("old", "Security の問題に編集された")
+	if got := classifyThreads([]ReviewThread{edited}, config, fed); got.StopReason == "" {
+		t.Fatal("an edited security finding on a fed thread must stop")
+	}
+	bot := rabbit("old", "直す")
+	bot.Replies = []ThreadComment{{Author: "coderabbitai", Bot: true, Body: "まだ残っています"}}
+	if got := classifyThreads([]ReviewThread{bot}, config, fed); got.StopReason != "" || len(got.New) != 0 {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestClassifyFindsSecurityBeyondTruncation(t *testing.T) {
+	config := RepoConfig{ExternalReviewAuthors: []string{"coderabbitai"}}
+	thread := rabbit("s", "長い本文")
+	thread.Sensitive = true
+	if got := classifyThreads([]ReviewThread{thread}, config, nil); got.StopReason == "" {
+		t.Fatal("sensitive thread must stop")
+	}
+}
+
+func TestUnresolvedThreadsReadsReplies(t *testing.T) {
+	long := strings.Repeat("あ", maxCommentRunes+10) + " security"
+	body := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[
+{"id":"T1","isResolved":false,"path":"a.go","line":3,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[
+{"body":"` + long + `","author":{"__typename":"Bot","login":"coderabbitai"}},
+{"body":"返信","author":{"__typename":"User","login":"tqer39"}}]}}]}}}}}`
+	forge, _ := forgeWith(map[string]response{"gh api": {out: body}})
+	threads, err := forge.UnresolvedThreads(context.Background(), 17)
+	if err != nil || len(threads) != 1 {
+		t.Fatalf("threads=%+v err=%v", threads, err)
+	}
+	if !threads[0].Sensitive || len(threads[0].Replies) != 1 || threads[0].Replies[0].Author != "tqer39" || threads[0].Replies[0].Bot {
+		t.Fatalf("thread=%+v", threads[0])
+	}
+}
+
+func TestUnresolvedThreadsRejectsCommentPagination(t *testing.T) {
+	body := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[
+{"id":"T1","isResolved":false,"path":"a.go","line":3,"comments":{"pageInfo":{"hasNextPage":true},"nodes":[]}}]}}}}}`
+	forge, _ := forgeWith(map[string]response{"gh api": {out: body}})
+	if _, err := forge.UnresolvedThreads(context.Background(), 17); err == nil {
+		t.Fatal("truncated comment list was accepted")
+	}
+}

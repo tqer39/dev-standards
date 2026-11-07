@@ -56,6 +56,7 @@ type fakeTree struct {
 	applyErr    error
 	commits     int
 	reverted    bool
+	pushErr     error
 }
 
 func (f *fakeTree) PathsFor(*Record) Paths {
@@ -81,7 +82,7 @@ func (f *fakeTree) Commit(context.Context, *Record) (string, error) {
 	f.commits++
 	return "abc", nil
 }
-func (f *fakeTree) Push(context.Context, *Record, string) error { return nil }
+func (f *fakeTree) Push(context.Context, *Record, string) error { return f.pushErr }
 func (f *fakeTree) StagedPatch(context.Context, *Record) (string, error) {
 	return "diff", nil
 }
@@ -101,6 +102,13 @@ type fakeForge struct {
 	threads     [][]ReviewThread
 	resolved    []string
 	waited      []string
+	mergeErr    error
+	prState     string
+	prSHA       string
+}
+
+func (f *fakeForge) PullRequestMerge(context.Context, int) (string, string, error) {
+	return f.prState, f.prSHA, nil
 }
 
 func (f *fakeForge) UnresolvedThreads(context.Context, int) ([]ReviewThread, error) {
@@ -144,10 +152,10 @@ func (f *fakeForge) ArmMerge(_ context.Context, _ int, sha string) error {
 	return nil
 }
 func (f *fakeForge) WaitMerged(_ context.Context, _ int, sha string) (string, error) {
-	if sha == "rev" {
+	if strings.HasPrefix(sha, "rev") {
 		return "revmerge", nil
 	}
-	return f.mergeResult, nil
+	return f.mergeResult, f.mergeErr
 }
 func (f *fakeForge) MarkNeedsHuman(_ context.Context, _ int, reason string) error {
 	f.needsHuman = append(f.needsHuman, reason)
@@ -410,5 +418,147 @@ func TestExternalSecurityFindingStops(t *testing.T) {
 	err := orchestrator.Run(context.Background(), rec, nil, true)
 	if !errors.Is(err, ErrStopped) || len(agents.sent) != 0 || len(forge.armed) != 0 {
 		t.Fatalf("err=%v sent=%v", err, agents.sent)
+	}
+}
+
+func TestAcceptancePatchIsScannedBeforePrepare(t *testing.T) {
+	tree := &fakeTree{}
+	forge := &fakeForge{}
+	orchestrator, rec := newOrchestrator(t, &fakeAgents{}, tree, forge, fakeScanner{leak: true})
+	err := orchestrator.Run(context.Background(), rec, []byte("+secret"), true)
+	if !errors.Is(err, ErrStopped) || rec.BaseSHA != "" || forge.prs != 0 {
+		t.Fatalf("err=%v rec=%+v", err, rec)
+	}
+}
+
+func TestRunRejectsEmptyCriteria(t *testing.T) {
+	agents := &fakeAgents{}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, &fakeForge{}, fakeScanner{})
+	rec.Criteria = "  \n "
+	if err := orchestrator.Run(context.Background(), rec, nil, true); err == nil || agents.started != 0 {
+		t.Fatalf("err=%v started=%d", err, agents.started)
+	}
+}
+
+func TestOmittedCriterionStopsMerge(t *testing.T) {
+	forge := &fakeForge{}
+	orchestrator, rec := newOrchestrator(t, &fakeAgents{reviews: [][]byte{[]byte(passVerdict)}}, &fakeTree{}, forge, fakeScanner{})
+	rec.Criteria = "- c\n- 省略された条件"
+	err := orchestrator.Run(context.Background(), rec, nil, true)
+	if !errors.Is(err, ErrStopped) || len(forge.armed) != 0 || forge.statuses[0] != "failure" {
+		t.Fatalf("err=%v forge=%+v", err, forge)
+	}
+}
+
+func TestResumeRecoversInterruptedRun(t *testing.T) {
+	agents := &fakeAgents{reviews: [][]byte{[]byte(passVerdict)}}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, &fakeForge{mergeResult: "merge"}, fakeScanner{})
+	rec.BaseSHA, rec.AcceptanceSHA = "base", "base"
+	if err := orchestrator.Resume(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Status != StatusCompleted {
+		t.Fatalf("status=%s", rec.Status)
+	}
+}
+
+func TestPushFailureStops(t *testing.T) {
+	tree := &fakeTree{pushErr: errors.New("remote changed")}
+	forge := &fakeForge{}
+	orchestrator, rec := newOrchestrator(t, &fakeAgents{}, tree, forge, fakeScanner{})
+	if err := orchestrator.Run(context.Background(), rec, nil, true); !errors.Is(err, ErrStopped) || forge.prs != 0 {
+		t.Fatalf("err=%v forge=%+v", err, forge)
+	}
+}
+
+func TestMergeTimeoutIsTrackedByReconcile(t *testing.T) {
+	agents := &fakeAgents{reviews: [][]byte{[]byte(passVerdict)}}
+	forge := &fakeForge{mergeErr: errors.New("timeout")}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, forge, fakeScanner{})
+	err := orchestrator.Run(context.Background(), rec, nil, true)
+	if !errors.Is(err, ErrStopped) || rec.Status != StatusMergeArmed || len(forge.needsHuman) != 1 {
+		t.Fatalf("err=%v rec=%+v", err, rec)
+	}
+	forge.prState = "OPEN"
+	if err := orchestrator.Reconcile(context.Background(), "o/n"); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := orchestrator.Store.Load("r1")
+	if stored.Status != StatusMergeArmed {
+		t.Fatalf("status=%s", stored.Status)
+	}
+	forge.prState, forge.prSHA = "MERGED", "late"
+	if err := orchestrator.Reconcile(context.Background(), "o/n"); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ = orchestrator.Store.Load("r1")
+	if stored.Status != StatusCompleted || stored.MergeSHA != "late" {
+		t.Fatalf("stored=%+v", stored)
+	}
+}
+
+func TestClosedArmedPullRequestStopsTracking(t *testing.T) {
+	forge := &fakeForge{prState: "CLOSED"}
+	orchestrator, rec := newOrchestrator(t, &fakeAgents{}, &fakeTree{}, forge, fakeScanner{})
+	rec.Status, rec.PR = StatusMergeArmed, 101
+	if err := orchestrator.Store.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := orchestrator.Reconcile(context.Background(), "o/n"); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := orchestrator.Store.Load("r1")
+	if stored.Status != StatusStopped {
+		t.Fatalf("status=%s", stored.Status)
+	}
+}
+
+func TestReconcileIgnoresRepoCase(t *testing.T) {
+	orchestrator, rec := newOrchestrator(t, &fakeAgents{}, &fakeTree{}, &fakeForge{}, fakeScanner{})
+	rec.Status, rec.MergeSHA, rec.Repo = StatusMergedUnchecked, "merge", "Owner/Name"
+	if err := orchestrator.Store.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := orchestrator.Reconcile(context.Background(), "owner/name"); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := orchestrator.Store.Load("r1")
+	if stored.Status != StatusCompleted {
+		t.Fatalf("status=%s", stored.Status)
+	}
+}
+
+func TestRunReconcilesInsideLock(t *testing.T) {
+	forge := &fakeForge{checks: []bool{false}}
+	tree := &fakeTree{}
+	agents := &fakeAgents{}
+	orchestrator, rec := newOrchestrator(t, agents, tree, forge, fakeScanner{})
+	old := *rec
+	old.RunID, old.Status, old.MergeSHA, old.PR = "old", StatusMergedUnchecked, "merge", 9
+	if err := orchestrator.Store.Save(&old); err != nil {
+		t.Fatal(err)
+	}
+	// 未確認のマージが失敗していれば、revert して新しいタスクを止める。
+	if err := orchestrator.Run(context.Background(), rec, nil, true); err == nil || agents.started != 0 || !tree.reverted {
+		t.Fatalf("err=%v started=%d reverted=%v", err, agents.started, tree.reverted)
+	}
+	if _, err := orchestrator.Store.Lock("o/n"); err != nil {
+		t.Fatalf("lock was not released: %v", err)
+	}
+}
+
+func TestRevertResumesExistingPullRequest(t *testing.T) {
+	forge := &fakeForge{checks: []bool{false}}
+	tree := &fakeTree{}
+	orchestrator, rec := newOrchestrator(t, &fakeAgents{}, tree, forge, fakeScanner{})
+	rec.Status, rec.MergeSHA, rec.PR, rec.RevertPR, rec.RevertSHA = StatusMergedUnchecked, "merge", 9, 55, "rev55"
+	if err := orchestrator.Store.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := orchestrator.Reconcile(context.Background(), "o/n"); err != nil {
+		t.Fatal(err)
+	}
+	if tree.reverted || forge.prs != 0 || forge.armed[0] != "rev55" {
+		t.Fatalf("reverted=%v prs=%d armed=%v", tree.reverted, forge.prs, forge.armed)
 	}
 }

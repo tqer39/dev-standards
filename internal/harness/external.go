@@ -36,6 +36,17 @@ type ReviewThread struct {
 	Path   string
 	Line   int
 	Body   string
+	// Sensitive は切り詰める前の本文にセキュリティの語があることを表す。
+	Sensitive bool
+	Replies   []ThreadComment
+}
+
+// ThreadComment はスレッドの 2 件目以降のコメントである。
+type ThreadComment struct {
+	Author    string
+	Bot       bool
+	Body      string
+	Sensitive bool
 }
 
 // FedThread は実装担当に修正を依頼した外部レビューの指摘である。
@@ -44,16 +55,19 @@ type FedThread struct {
 	Text string `json:"text"`
 }
 
-// cleanComment は表示されない部分を除く。隠れた文章を実装担当に渡さないためである。
-func cleanComment(body string) string {
+// visibleComment は表示されない部分を除く。隠れた文章を実装担当に渡さないためである。
+func visibleComment(body string) string {
 	body = htmlComment.ReplaceAllString(body, "")
 	body = htmlDetails.ReplaceAllString(body, "")
 	body = htmlTag.ReplaceAllString(body, "")
-	body = strings.TrimSpace(blankLines.ReplaceAllString(body, "\n"))
-	return truncate(body, maxCommentRunes)
+	return strings.TrimSpace(blankLines.ReplaceAllString(body, "\n"))
 }
 
-const threadsQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){pageInfo{hasNextPage}nodes{id isResolved path line comments(first:1){nodes{body author{__typename login}}}}}}}}`
+func cleanComment(body string) string {
+	return truncate(visibleComment(body), maxCommentRunes)
+}
+
+const threadsQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){pageInfo{hasNextPage}nodes{id isResolved path line comments(first:100){pageInfo{hasNextPage}nodes{body author{__typename login}}}}}}}}`
 
 // UnresolvedThreads は未解決のレビュースレッドを返す。
 func (g *GitHub) UnresolvedThreads(ctx context.Context, pr int) ([]ReviewThread, error) {
@@ -76,6 +90,9 @@ func (g *GitHub) UnresolvedThreads(ctx context.Context, pr int) ([]ReviewThread,
 							Path       string `json:"path"`
 							Line       int    `json:"line"`
 							Comments   struct {
+								PageInfo struct {
+									HasNextPage bool `json:"hasNextPage"`
+								} `json:"pageInfo"`
 								Nodes []struct {
 									Body   string `json:"body"`
 									Author struct {
@@ -102,12 +119,22 @@ func (g *GitHub) UnresolvedThreads(ctx context.Context, pr int) ([]ReviewThread,
 		if node.IsResolved {
 			continue
 		}
+		if node.Comments.PageInfo.HasNextPage {
+			return nil, fmt.Errorf("PR #%d のスレッド %s のコメントが多すぎます", pr, node.Path)
+		}
 		thread := ReviewThread{ID: node.ID, Path: node.Path, Line: node.Line}
-		if len(node.Comments.Nodes) > 0 {
-			comment := node.Comments.Nodes[0]
-			thread.Author = comment.Author.Login
-			thread.Bot = comment.Author.Type == "Bot"
-			thread.Body = cleanComment(comment.Body)
+		for i, comment := range node.Comments.Nodes {
+			item := ThreadComment{
+				Author:    comment.Author.Login,
+				Bot:       comment.Author.Type == "Bot",
+				Body:      cleanComment(comment.Body),
+				Sensitive: securityText.MatchString(visibleComment(comment.Body)),
+			}
+			if i == 0 {
+				thread.Author, thread.Bot, thread.Body, thread.Sensitive = item.Author, item.Bot, item.Body, item.Sensitive
+			} else {
+				thread.Replies = append(thread.Replies, item)
+			}
 		}
 		result = append(result, thread)
 	}
@@ -159,21 +186,24 @@ type threadClass struct {
 
 // classifyThreads はスレッドを修正依頼か人間の判断に分ける。
 // 人間の発言と Bot を装った利用者の発言は、LLM に任せず人間に返す。
+// 修正を依頼済みのスレッドでも、後からの返信や編集を見逃さないよう全コメントを検査する。
 func classifyThreads(threads []ReviewThread, config RepoConfig, fed []FedThread) threadClass {
 	var result threadClass
 	for _, thread := range threads {
-		if slices.ContainsFunc(fed, func(item FedThread) bool { return item.ID == thread.ID }) {
-			continue
+		comments := append([]ThreadComment{{Author: thread.Author, Bot: thread.Bot, Body: thread.Body, Sensitive: thread.Sensitive}}, thread.Replies...)
+		for _, comment := range comments {
+			if !comment.Bot || !slices.Contains(config.ExternalReviewAuthors, comment.Author) {
+				result.StopReason = fmt.Sprintf("%s の未解決のコメントがあります: %s:%d", comment.Author, thread.Path, thread.Line)
+				return result
+			}
+			if comment.Sensitive || securityText.MatchString(comment.Body) {
+				result.StopReason = fmt.Sprintf("%s がセキュリティまたは重大な問題を指摘しました: %s:%d", comment.Author, thread.Path, thread.Line)
+				return result
+			}
 		}
-		if !thread.Bot || !slices.Contains(config.ExternalReviewAuthors, thread.Author) {
-			result.StopReason = fmt.Sprintf("%s の未解決のコメントがあります: %s:%d", thread.Author, thread.Path, thread.Line)
-			return result
+		if !slices.ContainsFunc(fed, func(item FedThread) bool { return item.ID == thread.ID }) {
+			result.New = append(result.New, thread)
 		}
-		if securityText.MatchString(thread.Body) {
-			result.StopReason = fmt.Sprintf("%s がセキュリティまたは重大な問題を指摘しました: %s:%d", thread.Author, thread.Path, thread.Line)
-			return result
-		}
-		result.New = append(result.New, thread)
 	}
 	return result
 }

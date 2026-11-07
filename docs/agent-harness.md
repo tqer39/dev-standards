@@ -30,13 +30,20 @@ bin/agent-harness run \
 | --- | --- | --- |
 | 0 | マージと確認が完了、または revert が完了 | 表示された状態を確認する |
 | 3 | 利用枠の解除待ち | 解除後に `bin/agent-harness resume --run <run_id>` |
-| 4 | 人間の判断待ち | PR の `needs-human` と理由を確認する |
+| 4 | 人間の判断待ち | PR の `needs-human` と理由を確認する。auto-merge の待機が時間切れの場合、後でマージされても次の実行か `reconcile` で検証する |
 | 1 | その他の失敗 | 表示された内容を確認する |
 
 ## 停止と再開
 
 main の CI が失敗すると、そのリポジトリの自動処理を止めて revert する。
-原因を確認したら、人間が次を実行する。
+人間は解除の前に次を確認する。
+
+- revert PR がマージされた、または人手で main を復旧した。
+- 未完了の revert PR を閉じた。
+- main の CI が成功している。
+- 失敗の原因を把握した。
+
+確認できたら、人間が次を実行する。
 
 ```sh
 bin/agent-harness clear-stop --repo <owner>/<name>
