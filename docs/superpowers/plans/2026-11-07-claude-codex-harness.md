@@ -70,8 +70,10 @@ web_search = "disabled"
 
 [features]
 network_proxy = true
+# フックはサンドボックスの外で動くので、実装担当では無効にする。
+hooks = false
 
-[mcp_servers]
+# MCP にはドメイン制限が効かない。サーバーごとの無効化は起動時に -c で渡す。
 
 [permissions.agent-harness]
 description = "Workspace editing with package registries only."
@@ -118,6 +120,11 @@ trap 'rm -rf "$work"' EXIT
 git init -q -b main "$work"
 git -C "$work" -c user.name=probe -c user.email=probe@example.invalid commit -q --allow-empty -m init
 
+# 設定が読めないと拒否を期待する項目が無意味に成功するので、最初に確認する。
+if ! codex -p agent-harness mcp list --json >/dev/null 2>&1; then
+  echo "FAIL プロファイルを読み込めません"; exit 1
+fi
+
 failed=0
 sandbox() { codex -p agent-harness sandbox -P agent-harness -C "$work" -- "$@"; }
 expect_ok() {
@@ -154,10 +161,19 @@ expect_ok "一時オブジェクトでの差分出力" sh -c '
   GIT_ALTERNATE_OBJECT_DIRECTORIES="$PWD/.git/objects" \
   sh -c "git read-tree HEAD && git add -A && git diff --cached --binary --no-renames HEAD >/dev/null"'
 
-if codex -p agent-harness mcp list 2>/dev/null | grep -qiE "context7|linear"; then
-  echo "FAIL MCP の無効化"; failed=1
+expect_denied ".codex/config.toml への書き込み" sh -c 'mkdir -p .codex && echo x > .codex/config.toml'
+expect_denied ".codex/hooks.json への書き込み"  sh -c 'mkdir -p .codex && echo x > .codex/hooks.json'
+
+# 起動時に -c で無効化できることを確認する。ハーネスも同じ方法で全サーバーを止める。
+if ! servers="$(codex -p agent-harness mcp list --json 2>/dev/null)"; then
+  echo "FAIL MCP の一覧を取得できません"; failed=1
 else
-  echo "PASS MCP の無効化"
+  overrides=()
+  while IFS= read -r name; do
+    [ -n "$name" ] && overrides+=(-c "mcp_servers.$name.enabled=false")
+  done < <(printf '%s' "$servers" | python3 -c 'import json, sys; [print(s["name"]) for s in json.load(sys.stdin) if s.get("enabled")]')
+  remaining="$(codex -p agent-harness "${overrides[@]}" mcp list --json 2>/dev/null | python3 -c 'import json, sys; print(sum(1 for s in json.load(sys.stdin) if s.get("enabled")))')"
+  if [ "$remaining" = "0" ]; then echo "PASS MCP の無効化"; else echo "FAIL MCP の無効化"; failed=1; fi
 fi
 
 exit "$failed"
@@ -181,7 +197,7 @@ Expected: すべて `PASS` で終了コード 0。
 | --- | --- |
 | `.git/hooks`、`.git/config` への書き込み | 許容する。Git を常にサンドボックス内で動かす設計なので影響は閉じる。結果を仕様書に記録する |
 | 許可ドメインへの接続 | `default_permissions` と `sandbox_workspace_write` の競合を確認する。解消しなければ全面遮断（`[permissions.agent-harness.network] enabled = false`）に切り替える |
-| MCP の無効化 | `codex mcp list` に出たサーバーごとに、プロファイルへ `[mcp_servers.<name>]` と `enabled = false` を追加して再実行する |
+| MCP の無効化 | プロファイルに `[mcp_servers.<name>]` を書くと transport の検証で失敗する。起動時の `-c mcp_servers.<name>.enabled=false` で無効にする |
 | それ以外 | **ここで止めて人間に報告する。** Phase B に進まない |
 
 - [ ] **Step 5: `hc` と Codex の起動引数を確認する**
@@ -2294,14 +2310,19 @@ func herdrFor(runner Runner) *Herdr {
 }
 
 func TestStartImplementerUsesProfileWithoutSecrets(t *testing.T) {
-	runner := &scriptRunner{responses: map[string]response{}}
+	runner := &scriptRunner{responses: map[string]response{
+		"/abs/codex -p": {out: `[{"name":"context7","enabled":true},{"name":"off","enabled":false}]`},
+	}}
 	rec := &Record{RunID: "r1", Model: "gpt-6.1-sol", Effort: "high"}
 	if err := herdrFor(runner).StartImplementer(context.Background(), rec, "/work", "task"); err != nil {
 		t.Fatal(err)
 	}
-	call := runner.calls[0]
+	call := runner.calls[1]
 	joined := strings.Join(call.Args, " ")
-	for _, part := range []string{"--bg", "--name impl-r1", "--cwd /work", "--no-parent", "/abs/codex", "--no-daemon", "-p agent-harness", "-m gpt-6.1-sol", `model_reasoning_effort="high"`, `projects."/work".trust_level="trusted"`, "--ask-for-approval never"} {
+	if strings.Contains(joined, "mcp_servers.off") {
+		t.Errorf("disabled server was passed: %s", joined)
+	}
+	for _, part := range []string{"mcp_servers.context7.enabled=false", "--bg", "--name impl-r1", "--cwd /work", "--no-parent", "/abs/codex", "--no-daemon", "-p agent-harness", "-m gpt-6.1-sol", `model_reasoning_effort="high"`, `projects."/work".trust_level="trusted"`, "--ask-for-approval never"} {
 		if !strings.Contains(joined, part) {
 			t.Errorf("missing %q in %s", part, joined)
 		}
@@ -2465,18 +2486,47 @@ type Herdr struct {
 func implName(rec *Record) string   { return "impl-" + rec.RunID }
 func reviewName(rec *Record) string { return "review-" + rec.RunID }
 
-func (h *Herdr) implementerArgs(rec *Record, work, prompt string) []string {
-	return []string{
+// enabledMCP は有効な MCP サーバーを返す。MCP にはドメイン制限が効かないので、実装担当では止める。
+func (h *Herdr) enabledMCP(ctx context.Context) ([]string, error) {
+	out, err := h.Run.Run(ctx, Cmd{Name: h.Codex, Args: []string{"-p", "agent-harness", "mcp", "list", "--json"}})
+	if err != nil {
+		return nil, err
+	}
+	var servers []struct {
+		Name    string `json:"name"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := json.Unmarshal([]byte(out), &servers); err != nil {
+		return nil, fmt.Errorf("MCP の一覧を解釈できません: %w", err)
+	}
+	var names []string
+	for _, server := range servers {
+		if server.Enabled {
+			names = append(names, server.Name)
+		}
+	}
+	return names, nil
+}
+
+func (h *Herdr) implementerArgs(rec *Record, work, prompt string, disabledMCP []string) []string {
+	args := []string{
 		"run", "--bg", "--json", "--name", implName(rec), "--cwd", work, "--no-parent", "--",
 		h.Codex, "--no-daemon", "-p", "agent-harness", "-m", rec.Model,
 		"-c", fmt.Sprintf("model_reasoning_effort=%q", rec.Effort),
 		"-c", fmt.Sprintf("projects.%q.trust_level=%q", work, "trusted"),
-		"--ask-for-approval", "never", prompt,
 	}
+	for _, name := range disabledMCP {
+		args = append(args, "-c", "mcp_servers."+name+".enabled=false")
+	}
+	return append(args, "--ask-for-approval", "never", prompt)
 }
 
 func (h *Herdr) StartImplementer(ctx context.Context, rec *Record, work, prompt string) error {
-	_, err := h.Run.Run(ctx, Cmd{Name: h.HC, Args: h.implementerArgs(rec, work, prompt)})
+	disabled, err := h.enabledMCP(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = h.Run.Run(ctx, Cmd{Name: h.HC, Args: h.implementerArgs(rec, work, prompt, disabled)})
 	return err
 }
 
