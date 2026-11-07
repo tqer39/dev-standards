@@ -119,3 +119,15 @@ func TestCommandOutputStopsAtLimit(t *testing.T) {
 		t.Fatalf("elapsed=%v", elapsed)
 	}
 }
+
+func TestCommandOutputReturnsPath(t *testing.T) {
+	got, err := commandOutput(5*time.Second, "sh", "-c", "echo /x/bin/tool")
+	if err != nil || got != "/x/bin/tool" {
+		t.Fatalf("got=%q err=%v", got, err)
+	}
+	// 正常に終わった後も、子の子が stderr を開いたまま残ることがある。出力は使う。
+	got, err = commandOutput(5*time.Second, "sh", "-c", "echo /x/bin/tool; sleep 3 >/dev/null &")
+	if err != nil || got != "/x/bin/tool" {
+		t.Fatalf("got=%q err=%v", got, err)
+	}
+}
