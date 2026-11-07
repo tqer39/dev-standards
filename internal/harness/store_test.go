@@ -3,6 +3,7 @@
 package harness
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -81,5 +82,21 @@ func TestNewRunIDFitsHerdrNameLimit(t *testing.T) {
 	id := NewRunID(time.Date(2026, 11, 9, 6, 1, 2, 0, time.UTC))
 	if len("review-"+id) > 32 {
 		t.Fatalf("too long: %s", id)
+	}
+}
+
+func TestRecordJSONKeysAreStableForTelemetry(t *testing.T) {
+	data, err := json.Marshal(Record{RunID: "r", PR: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys map[string]any
+	if err := json.Unmarshal(data, &keys); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"run_id", "repo", "kind", "agent", "model", "effort", "status", "repairs", "pr", "first_round_passed", "started_at", "updated_at"} {
+		if _, ok := keys[key]; !ok {
+			t.Errorf("missing key %s", key)
+		}
 	}
 }
