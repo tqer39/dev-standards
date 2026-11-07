@@ -4,6 +4,7 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -320,7 +321,7 @@ func (o *Orchestrator) review(ctx context.Context, rec *Record, paths Paths, con
 	case ReviewQuota:
 		return "", o.waitQuota(rec)
 	case ReviewFailed:
-		return "", o.stop(ctx, rec, "レビューの実行に失敗しました。")
+		return "", o.stop(ctx, rec, "レビューの実行に失敗しました。"+reviewFailureDetail(data))
 	case ReviewTimeout:
 		return "", o.stop(ctx, rec, "レビューの時間上限に達しました。")
 	}
@@ -553,6 +554,17 @@ func (o *Orchestrator) stop(ctx context.Context, rec *Record, reason string) err
 		}
 	}
 	return o.stopLocal(rec, reason)
+}
+
+// reviewFailureDetail は Claude の出力から失敗理由を取り出す。
+func reviewFailureDetail(data []byte) string {
+	var result struct {
+		Result string `json:"result"`
+	}
+	if json.Unmarshal(data, &result) != nil || result.Result == "" {
+		return ""
+	}
+	return " " + truncate(result.Result, 300)
 }
 
 func formatIssues(verdict Verdict) string {

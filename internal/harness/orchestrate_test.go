@@ -14,6 +14,7 @@ type fakeAgents struct {
 	implOutcomes []ImplOutcome
 	reviews      [][]byte
 	reviewOut    ReviewOutcome
+	failure      []byte
 	sent         []string
 	started      int
 	reviewed     int
@@ -42,7 +43,7 @@ func (f *fakeAgents) Review(_ context.Context, _ *Record, _, prompt string, _ ti
 	f.reviewed++
 	f.prompts = append(f.prompts, prompt)
 	if f.reviewOut != ReviewDone {
-		return f.reviewOut, nil, nil
+		return f.reviewOut, f.failure, nil
 	}
 	data := f.reviews[0]
 	if len(f.reviews) > 1 {
@@ -630,5 +631,15 @@ func TestImplementerIsClosedOnlyAfterMerge(t *testing.T) {
 	orchestrator, rec = newOrchestrator(t, stopped, &fakeTree{}, &fakeForge{}, fakeScanner{leak: true})
 	if err := orchestrator.Run(context.Background(), rec, nil, true); !errors.Is(err, ErrStopped) || stopped.closed != 0 {
 		t.Fatalf("err=%v closed=%d", err, stopped.closed)
+	}
+}
+
+func TestReviewFailureReportsReason(t *testing.T) {
+	agents := &fakeAgents{reviewOut: ReviewFailed, failure: []byte(`{"is_error":true,"result":"API Error: 古い版です"}`)}
+	forge := &fakeForge{}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, forge, fakeScanner{})
+	err := orchestrator.Run(context.Background(), rec, nil, true)
+	if !errors.Is(err, ErrStopped) || !strings.Contains(rec.StopReason, "古い版です") {
+		t.Fatalf("err=%v reason=%q", err, rec.StopReason)
 	}
 }

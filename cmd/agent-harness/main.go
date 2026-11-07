@@ -146,7 +146,32 @@ func resolve(name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%s が見つかりません: %w", name, err)
 	}
-	return filepath.Abs(path)
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return realPath(path, name, miseWhich)
+}
+
+func miseWhich(name string) (string, error) {
+	out, err := exec.Command("mise", "which", name).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// realPath は mise の shim を実体に解決する。shim のまま渡すと、Herdr の端末では
+// PATH の別の版に切り替わることがある。解決できなければ別の版で動かさず失敗させる。
+func realPath(path, name string, which func(string) (string, error)) (string, error) {
+	if !strings.Contains(path, "/mise/shims/") {
+		return path, nil
+	}
+	real, err := which(name)
+	if err != nil || real == "" {
+		return "", fmt.Errorf("mise の shim から %s の実体を解決できません: %v", name, err)
+	}
+	return real, nil
 }
 
 func build(repo, codexAuth string) (*harness.Orchestrator, error) {
@@ -398,9 +423,14 @@ func doctor(args []string, out io.Writer) error {
 	if *codexAuth != "chatgpt" {
 		check("Codex の API キー", err)
 	}
-	status, err := harness.OSRunner{}.Run(context.Background(), harness.Cmd{Name: "claude", Args: []string{"auth", "status"}})
+	// 実際のレビューと同じ実体で確認する。
+	claude, err := resolve("claude")
 	if err == nil {
-		err = claudeLoggedIn(status)
+		var status string
+		status, err = harness.OSRunner{}.Run(context.Background(), harness.Cmd{Name: claude, Args: []string{"auth", "status"}})
+		if err == nil {
+			err = claudeLoggedIn(status)
+		}
 	}
 	check("Claude のログイン", err)
 	tokens := &harness.AppTokens{

@@ -244,10 +244,11 @@ func (h *Herdr) Review(ctx context.Context, rec *Record, dir, prompt string, lim
 				return ReviewDone, data, err
 			}
 			stderr, _ := os.ReadFile(errPath)
-			if quotaPattern.Match(stderr) {
+			data, _ := os.ReadFile(output)
+			if quotaPattern.Match(stderr) || quotaPattern.Match(data) {
 				return ReviewQuota, nil, nil
 			}
-			return ReviewFailed, nil, nil
+			return ReviewFailed, data, nil
 		}
 		if !time.Now().Before(deadline) {
 			return ReviewTimeout, nil, nil

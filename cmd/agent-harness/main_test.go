@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -87,5 +88,21 @@ func TestCodexHomeForAuth(t *testing.T) {
 	}
 	if _, err := codexHomeFor("other"); err == nil {
 		t.Fatal("unknown auth was accepted")
+	}
+}
+
+func TestRealPathResolvesMiseShims(t *testing.T) {
+	which := func(name string) (string, error) { return "/installs/" + name + "/1/bin/" + name, nil }
+	got, err := realPath("/home/u/.local/share/mise/shims/claude", "claude", which)
+	if err != nil || got != "/installs/claude/1/bin/claude" {
+		t.Fatalf("got=%q err=%v", got, err)
+	}
+	got, err = realPath("/opt/homebrew/bin/gh", "gh", which)
+	if err != nil || got != "/opt/homebrew/bin/gh" {
+		t.Fatalf("got=%q err=%v", got, err)
+	}
+	failing := func(string) (string, error) { return "", errors.New("not active") }
+	if _, err := realPath("/home/u/.local/share/mise/shims/claude", "claude", failing); err == nil {
+		t.Fatal("an unresolved shim must fail instead of falling back to another version")
 	}
 }
