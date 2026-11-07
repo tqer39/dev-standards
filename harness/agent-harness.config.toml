@@ -6,6 +6,10 @@ web_search = "disabled"
 network_proxy = true
 # フックはサンドボックスの外で動くので、実装担当では無効にする。
 hooks = false
+# プラグインとアプリは GitHub などへの経路を持つので、実装担当では使わない。
+plugins = false
+apps = false
+computer_use = false
 
 # MCP にはドメイン制限が効かない。サーバーごとの無効化は起動時に -c で渡す。
 
