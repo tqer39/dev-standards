@@ -83,9 +83,10 @@ func TestWaitExternalReviewStopsAtDeadlineWhileRunning(t *testing.T) {
 
 func TestClassifyThreads(t *testing.T) {
 	config := RepoConfig{ExternalReviewAuthors: []string{"coderabbitai"}}
-	fed := []FedThread{{ID: "old", Text: "x"}}
+	old := ReviewThread{ID: "old", Author: "coderabbitai", Bot: true, Body: "fixed earlier"}
+	fed := []FedThread{{ID: "old", Text: formatThread(old)}}
 	got := classifyThreads([]ReviewThread{
-		{ID: "old", Author: "coderabbitai", Bot: true, Body: "fixed earlier"},
+		old,
 		{ID: "new", Author: "coderabbitai", Bot: true, Path: "a.go", Line: 2, Body: "Minor: rename"},
 	}, config, fed)
 	if len(got.New) != 1 || got.New[0].ID != "new" || got.StopReason != "" {
@@ -129,10 +130,26 @@ func TestClassifyInspectsRepliesOnFedThreads(t *testing.T) {
 	if got := classifyThreads([]ReviewThread{edited}, config, fed); got.StopReason == "" {
 		t.Fatal("an edited security finding on a fed thread must stop")
 	}
-	bot := rabbit("old", "直す")
-	bot.Replies = []ThreadComment{{Author: "coderabbitai", Bot: true, Body: "まだ残っています"}}
-	if got := classifyThreads([]ReviewThread{bot}, config, fed); got.StopReason != "" || len(got.New) != 0 {
-		t.Fatalf("got=%+v", got)
+}
+
+func TestClassifyFeedsNewBotContentOnFedThreads(t *testing.T) {
+	config := RepoConfig{ExternalReviewAuthors: []string{"coderabbitai"}}
+	original := rabbit("old", "直す")
+	fed := []FedThread{{ID: "old", Text: formatThread(original)}}
+	if got := classifyThreads([]ReviewThread{original}, config, fed); len(got.New) != 0 || got.StopReason != "" {
+		t.Fatalf("unchanged thread: %+v", got)
+	}
+	replied := rabbit("old", "直す")
+	replied.Replies = []ThreadComment{{Author: "coderabbitai", Bot: true, Body: "別の問題が残っています"}}
+	if got := classifyThreads([]ReviewThread{replied}, config, fed); len(got.New) != 1 || got.StopReason != "" {
+		t.Fatalf("new reply: %+v", got)
+	}
+	edited := rabbit("old", "編集された指摘")
+	if got := classifyThreads([]ReviewThread{edited}, config, fed); len(got.New) != 1 {
+		t.Fatalf("edited: %+v", got)
+	}
+	if text := formatThread(replied); !strings.Contains(text, "別の問題が残っています") {
+		t.Fatalf("text=%s", text)
 	}
 }
 

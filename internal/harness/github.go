@@ -27,6 +27,24 @@ func (g *GitHub) gh(ctx context.Context, args ...string) (string, error) {
 	return g.Run.Run(ctx, Cmd{Name: "gh", Args: args, Env: []string{"GH_TOKEN=" + token}, Secrets: []string{token}})
 }
 
+// OpenPullRequest はブランチの未マージの PR を返す。なければ 0 を返す。
+func (g *GitHub) OpenPullRequest(ctx context.Context, head string) (int, error) {
+	out, err := g.gh(ctx, "pr", "list", "--repo", g.Repo, "--head", head, "--state", "open", "--json", "number")
+	if err != nil {
+		return 0, err
+	}
+	var prs []struct {
+		Number int `json:"number"`
+	}
+	if err := json.Unmarshal([]byte(out), &prs); err != nil {
+		return 0, err
+	}
+	if len(prs) == 0 {
+		return 0, nil
+	}
+	return prs[0].Number, nil
+}
+
 func (g *GitHub) CreatePR(ctx context.Context, head, base, title, body string) (int, error) {
 	out, err := g.gh(ctx, "pr", "create", "--repo", g.Repo, "--head", head, "--base", base, "--title", title, "--body", body)
 	if err != nil {

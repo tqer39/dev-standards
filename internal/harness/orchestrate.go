@@ -55,6 +55,7 @@ type Forge interface {
 	ResolveThread(context.Context, string) error
 	WaitExternalReview(context.Context, string, string, time.Duration) error
 	PullRequestMerge(context.Context, int) (string, string, error)
+	OpenPullRequest(context.Context, string) (int, error)
 }
 
 type Scanner interface {
@@ -246,7 +247,7 @@ func (o *Orchestrator) round(ctx context.Context, rec *Record, paths Paths) (str
 	}
 	rec.HeadSHA = sha
 	if rec.PR == 0 {
-		number, err := o.Forge.CreatePR(ctx, "agent/"+rec.RunID, rec.Base, rec.Title, prBody(rec))
+		number, err := o.ensurePR(ctx, "agent/"+rec.RunID, rec.Base, rec.Title, prBody(rec))
 		if err != nil {
 			return "", err
 		}
@@ -378,13 +379,21 @@ func (o *Orchestrator) externalReview(ctx context.Context, rec *Record, sha stri
 	if len(class.New) > 0 {
 		texts := make([]string, 0, len(class.New))
 		for _, thread := range class.New {
-			text := formatThread(thread)
-			rec.FedThreads = append(rec.FedThreads, FedThread{ID: thread.ID, Text: text})
-			texts = append(texts, text)
+			rec.FedThreads = recordFedThread(rec.FedThreads, thread)
+			texts = append(texts, formatThread(thread))
 		}
 		return nil, "外部レビューの指摘です。妥当なものを修正し、妥当でないものは理由を summary に書いてください。\n\n" + strings.Join(texts, "\n\n"), nil
 	}
 	return threads, "", nil
+}
+
+// ensurePR は作成直後に中断した PR があれば再利用する。
+func (o *Orchestrator) ensurePR(ctx context.Context, head, base, title, body string) (int, error) {
+	number, err := o.Forge.OpenPullRequest(ctx, head)
+	if err != nil || number != 0 {
+		return number, err
+	}
+	return o.Forge.CreatePR(ctx, head, base, title, body)
 }
 
 func (o *Orchestrator) merge(ctx context.Context, rec *Record, config RepoConfig) error {
@@ -436,7 +445,7 @@ func (o *Orchestrator) checkMain(ctx context.Context, rec *Record, config RepoCo
 		if err != nil {
 			return o.stop(ctx, rec, reason+"。revert を作成できません: "+err.Error())
 		}
-		number, err := o.Forge.CreatePR(ctx, branch, rec.Base, "revert: "+rec.Title, "main の CI が失敗したので、自動で元に戻します。\n\n対象: #"+fmt.Sprint(rec.PR))
+		number, err := o.ensurePR(ctx, branch, rec.Base, "revert: "+rec.Title, "main の CI が失敗したので、自動で元に戻します。\n\n対象: #"+fmt.Sprint(rec.PR))
 		if err != nil {
 			return o.stop(ctx, rec, reason+"。revert PR を作成できません: "+err.Error())
 		}

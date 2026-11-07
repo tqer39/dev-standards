@@ -201,7 +201,8 @@ func classifyThreads(threads []ReviewThread, config RepoConfig, fed []FedThread)
 				return result
 			}
 		}
-		if !slices.ContainsFunc(fed, func(item FedThread) bool { return item.ID == thread.ID }) {
+		// 依頼済みでも、Bot の返信や編集で内容が変われば改めて依頼する。
+		if !slices.ContainsFunc(fed, func(item FedThread) bool { return item.ID == thread.ID && item.Text == formatThread(thread) }) {
 			result.New = append(result.New, thread)
 		}
 	}
@@ -209,5 +210,21 @@ func classifyThreads(threads []ReviewThread, config RepoConfig, fed []FedThread)
 }
 
 func formatThread(thread ReviewThread) string {
-	return fmt.Sprintf("%s:%d (%s)\n%s", thread.Path, thread.Line, thread.Author, thread.Body)
+	text := fmt.Sprintf("%s:%d (%s)\n%s", thread.Path, thread.Line, thread.Author, thread.Body)
+	for _, reply := range thread.Replies {
+		text += fmt.Sprintf("\n返信 (%s): %s", reply.Author, reply.Body)
+	}
+	return text
+}
+
+// recordFedThread は依頼した内容を記録する。同じスレッドは最新の内容に置き換える。
+func recordFedThread(fed []FedThread, thread ReviewThread) []FedThread {
+	text := formatThread(thread)
+	for i := range fed {
+		if fed[i].ID == thread.ID {
+			fed[i].Text = text
+			return fed
+		}
+	}
+	return append(fed, FedThread{ID: thread.ID, Text: text})
 }

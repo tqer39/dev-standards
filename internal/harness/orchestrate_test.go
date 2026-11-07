@@ -105,6 +105,11 @@ type fakeForge struct {
 	mergeErr    error
 	prState     string
 	prSHA       string
+	open        map[string]int
+}
+
+func (f *fakeForge) OpenPullRequest(_ context.Context, head string) (int, error) {
+	return f.open[head], nil
 }
 
 func (f *fakeForge) PullRequestMerge(context.Context, int) (string, string, error) {
@@ -560,5 +565,51 @@ func TestRevertResumesExistingPullRequest(t *testing.T) {
 	}
 	if tree.reverted || forge.prs != 0 || forge.armed[0] != "rev55" {
 		t.Fatalf("reverted=%v prs=%d armed=%v", tree.reverted, forge.prs, forge.armed)
+	}
+}
+
+func TestRevertFindsPullRequestCreatedBeforeInterruption(t *testing.T) {
+	forge := &fakeForge{checks: []bool{false}, open: map[string]int{"agent/revert-r1": 77}}
+	tree := &fakeTree{}
+	orchestrator, rec := newOrchestrator(t, &fakeAgents{}, tree, forge, fakeScanner{})
+	rec.Status, rec.MergeSHA, rec.PR = StatusMergedUnchecked, "merge", 9
+	if err := orchestrator.Store.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := orchestrator.Reconcile(context.Background(), "o/n"); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := orchestrator.Store.Load("r1")
+	if forge.prs != 0 || stored.RevertPR != 77 || stored.Status != StatusReverted {
+		t.Fatalf("prs=%d stored=%+v", forge.prs, stored)
+	}
+}
+
+func TestRunFindsPullRequestCreatedBeforeInterruption(t *testing.T) {
+	agents := &fakeAgents{reviews: [][]byte{[]byte(passVerdict)}}
+	forge := &fakeForge{mergeResult: "merge", open: map[string]int{"agent/r1": 88}}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, forge, fakeScanner{})
+	if err := orchestrator.Run(context.Background(), rec, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if forge.prs != 0 || rec.PR != 88 {
+		t.Fatalf("prs=%d pr=%d", forge.prs, rec.PR)
+	}
+}
+
+func TestChangedFedThreadIsFedAgain(t *testing.T) {
+	agents := &fakeAgents{reviews: [][]byte{[]byte(passVerdict)}}
+	replied := rabbit("T1", "直す")
+	replied.Replies = []ThreadComment{{Author: "coderabbitai", Bot: true, Body: "別の問題"}}
+	forge := &fakeForge{mergeResult: "merge", threads: [][]ReviewThread{{rabbit("T1", "直す")}, {replied}, {replied}}}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, forge, fakeScanner{})
+	if err := orchestrator.Run(context.Background(), rec, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Repairs != 2 || !strings.Contains(agents.sent[1], "別の問題") {
+		t.Fatalf("repairs=%d sent=%v", rec.Repairs, agents.sent)
+	}
+	if len(rec.FedThreads) != 1 || !strings.Contains(agents.prompts[0], "別の問題") {
+		t.Fatalf("fed=%+v prompt=%s", rec.FedThreads, agents.prompts[0])
 	}
 }

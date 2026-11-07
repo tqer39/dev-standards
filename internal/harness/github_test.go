@@ -86,6 +86,21 @@ func TestMarkNeedsHuman(t *testing.T) {
 	}
 }
 
+func TestOpenPullRequestFindsByHead(t *testing.T) {
+	forge, runner := forgeWith(map[string]response{"gh pr": {out: `[{"number":55}]`}})
+	number, err := forge.OpenPullRequest(context.Background(), "agent/revert-r1")
+	if err != nil || number != 55 {
+		t.Fatalf("number=%d err=%v", number, err)
+	}
+	if !runner.called("gh", "pr list", "--head agent/revert-r1", "--state open") {
+		t.Fatalf("calls=%+v", runner.calls)
+	}
+	forge, _ = forgeWith(map[string]response{"gh pr": {out: `[]`}})
+	if number, err := forge.OpenPullRequest(context.Background(), "x"); err != nil || number != 0 {
+		t.Fatalf("number=%d err=%v", number, err)
+	}
+}
+
 func TestPullRequestMergeReadsStateWithoutHeadCheck(t *testing.T) {
 	forge, _ := forgeWith(map[string]response{"gh pr": {out: `{"state":"MERGED","mergeCommit":{"oid":"def"}}`}})
 	state, sha, err := forge.PullRequestMerge(context.Background(), 17)
