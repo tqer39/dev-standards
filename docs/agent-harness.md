@@ -60,9 +60,14 @@ bin/agent-harness reconcile --repo <owner>/<name>
 {
   "stop_paths": ["billing/**"],
   "verify": ["mise", "run", "check"],
-  "required_check": "workflow-result"
+  "required_check": "workflow-result",
+  "external_review_check": "CodeRabbit",
+  "external_review_authors": ["coderabbitai"]
 }
 ```
+
+`external_review_check` に `none` を指定すると、外部レビューの完了を待たない。
+未解決のスレッドは、この設定にかかわらず確認する。
 
 ## 関連リポジトリの改善
 

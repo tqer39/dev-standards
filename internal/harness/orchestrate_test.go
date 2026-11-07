@@ -5,6 +5,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -15,6 +16,8 @@ type fakeAgents struct {
 	reviewOut    ReviewOutcome
 	sent         []string
 	started      int
+	reviewed     int
+	prompts      []string
 }
 
 func (f *fakeAgents) StartImplementer(context.Context, *Record, string, string) error {
@@ -33,7 +36,9 @@ func (f *fakeAgents) WaitImplementer(context.Context, *Record, string, time.Dura
 	}
 	return outcome, Result{Status: "done"}, nil
 }
-func (f *fakeAgents) Review(context.Context, *Record, string, string, time.Duration) (ReviewOutcome, []byte, error) {
+func (f *fakeAgents) Review(_ context.Context, _ *Record, _, prompt string, _ time.Duration) (ReviewOutcome, []byte, error) {
+	f.reviewed++
+	f.prompts = append(f.prompts, prompt)
 	if f.reviewOut != ReviewDone {
 		return f.reviewOut, nil, nil
 	}
@@ -93,6 +98,28 @@ type fakeForge struct {
 	needsHuman  []string
 	mergeResult string
 	comments    int
+	threads     [][]ReviewThread
+	resolved    []string
+	waited      []string
+}
+
+func (f *fakeForge) UnresolvedThreads(context.Context, int) ([]ReviewThread, error) {
+	if len(f.threads) == 0 {
+		return nil, nil
+	}
+	result := f.threads[0]
+	if len(f.threads) > 1 {
+		f.threads = f.threads[1:]
+	}
+	return result, nil
+}
+func (f *fakeForge) ResolveThread(_ context.Context, id string) error {
+	f.resolved = append(f.resolved, id)
+	return nil
+}
+func (f *fakeForge) WaitExternalReview(_ context.Context, _, name string, _ time.Duration) error {
+	f.waited = append(f.waited, name)
+	return nil
 }
 
 func (f *fakeForge) CreatePR(context.Context, string, string, string, string) (int, error) {
@@ -146,7 +173,7 @@ func newOrchestrator(t *testing.T, agents *fakeAgents, tree *fakeTree, forge *fa
 	orchestrator := &Orchestrator{
 		Store: store, Agents: agents, Tree: tree, Forge: forge, Scanner: scanner,
 		Config: func(string) (RepoConfig, error) {
-			return RepoConfig{Policy: Policy{StopPaths: []string{".github/workflows/**"}}, Verify: []string{"true"}, RequiredCheck: "workflow-result"}, nil
+			return RepoConfig{Policy: Policy{StopPaths: []string{".github/workflows/**"}}, Verify: []string{"true"}, RequiredCheck: "workflow-result", ExternalReviewCheck: "CodeRabbit", ExternalReviewAuthors: []string{"coderabbitai"}}, nil
 		},
 		RoundLimit: time.Minute, MergeLimit: time.Minute,
 	}
@@ -309,5 +336,79 @@ func TestReconcileChecksUnverifiedMerges(t *testing.T) {
 	stored, err := orchestrator.Store.Load("r1")
 	if err != nil || stored.Status != StatusCompleted {
 		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+}
+
+func rabbit(id, body string) ReviewThread {
+	return ReviewThread{ID: id, Author: "coderabbitai", Bot: true, Path: "a.go", Line: 1, Body: body}
+}
+
+func TestExternalFindingIsRepairedThenResolved(t *testing.T) {
+	agents := &fakeAgents{reviews: [][]byte{[]byte(passVerdict)}}
+	forge := &fakeForge{mergeResult: "merge", threads: [][]ReviewThread{{rabbit("T1", "変数名を直す")}, {rabbit("T1", "変数名を直す")}}}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, forge, fakeScanner{})
+	if err := orchestrator.Run(context.Background(), rec, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(forge.waited) != 2 || forge.waited[0] != "CodeRabbit" {
+		t.Fatalf("waited=%v", forge.waited)
+	}
+	// 指摘があるラウンドでは、別モデルのレビューに進まない。
+	if agents.reviewed != 1 || rec.Repairs != 1 || rec.FirstRoundPassed {
+		t.Fatalf("reviewed=%d rec=%+v", agents.reviewed, rec)
+	}
+	if len(agents.sent) != 1 || !strings.Contains(agents.sent[0], "変数名を直す") {
+		t.Fatalf("sent=%v", agents.sent)
+	}
+	// レビュー担当にも過去の指摘を渡し、解消を確認させる。
+	if !strings.Contains(agents.prompts[0], "変数名を直す") {
+		t.Fatalf("prompt=%s", agents.prompts[0])
+	}
+	if len(forge.resolved) != 1 || forge.resolved[0] != "T1" || rec.Status != StatusCompleted {
+		t.Fatalf("resolved=%v status=%s", forge.resolved, rec.Status)
+	}
+}
+
+func TestResolvesOnlyThreadsStillOpen(t *testing.T) {
+	agents := &fakeAgents{reviews: [][]byte{[]byte(passVerdict)}}
+	// CodeRabbit が修正を検知して自分で解決した場合は、ハーネスは何もしない。
+	forge := &fakeForge{mergeResult: "merge", threads: [][]ReviewThread{{rabbit("T1", "直す")}, {}}}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, forge, fakeScanner{})
+	if err := orchestrator.Run(context.Background(), rec, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(forge.resolved) != 0 {
+		t.Fatalf("resolved=%v", forge.resolved)
+	}
+}
+
+func TestExternalFindingsShareRepairLimit(t *testing.T) {
+	agents := &fakeAgents{}
+	forge := &fakeForge{threads: [][]ReviewThread{{rabbit("A", "1")}, {rabbit("B", "2")}, {rabbit("C", "3")}}}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, forge, fakeScanner{})
+	err := orchestrator.Run(context.Background(), rec, nil, true)
+	if !errors.Is(err, ErrStopped) || rec.Repairs != 2 || len(forge.armed) != 0 || agents.reviewed != 0 {
+		t.Fatalf("err=%v rec=%+v", err, rec)
+	}
+}
+
+func TestHumanCommentStopsBeforeMerge(t *testing.T) {
+	agents := &fakeAgents{}
+	human := ReviewThread{ID: "H", Author: "tqer39", Path: "a.go", Line: 1, Body: "待って"}
+	forge := &fakeForge{threads: [][]ReviewThread{{human}}}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, forge, fakeScanner{})
+	err := orchestrator.Run(context.Background(), rec, nil, true)
+	if !errors.Is(err, ErrStopped) || len(forge.armed) != 0 || len(agents.sent) != 0 || len(forge.needsHuman) != 1 {
+		t.Fatalf("err=%v sent=%v forge=%+v", err, agents.sent, forge)
+	}
+}
+
+func TestExternalSecurityFindingStops(t *testing.T) {
+	agents := &fakeAgents{}
+	forge := &fakeForge{threads: [][]ReviewThread{{rabbit("S", "**Security** の問題")}}}
+	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, forge, fakeScanner{})
+	err := orchestrator.Run(context.Background(), rec, nil, true)
+	if !errors.Is(err, ErrStopped) || len(agents.sent) != 0 || len(forge.armed) != 0 {
+		t.Fatalf("err=%v sent=%v", err, agents.sent)
 	}
 }

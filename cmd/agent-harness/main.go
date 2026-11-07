@@ -154,9 +154,10 @@ func build(repo string) (*harness.Orchestrator, error) {
 		Scanner: harness.Gitleaks{
 			Run: runner, Bin: paths["gitleaks"], Dir: root,
 		},
-		Config:     harness.LoadRepoConfig,
-		RoundLimit: 30 * time.Minute,
-		MergeLimit: 30 * time.Minute,
+		Config:        harness.LoadRepoConfig,
+		RoundLimit:    30 * time.Minute,
+		MergeLimit:    30 * time.Minute,
+		ExternalGrace: harness.ExternalReviewGrace,
 	}, nil
 }
 

@@ -31,6 +31,9 @@ type RepoConfig struct {
 	Policy        Policy
 	Verify        []string
 	RequiredCheck string
+	// ExternalReviewCheck が空なら外部レビューを待たない。
+	ExternalReviewCheck   string
+	ExternalReviewAuthors []string
 }
 
 // DefaultPolicy は人間の確認で止めるパスを定義する。
@@ -130,9 +133,11 @@ func ParseRaw(raw string) ([]Change, error) {
 // LoadRepoConfig は基準ブランチの checkout から設定を読む。既定の停止パスは削除できない。
 func LoadRepoConfig(baseDir string) (RepoConfig, error) {
 	config := RepoConfig{
-		Policy:        DefaultPolicy(),
-		Verify:        []string{"mise", "run", "check"},
-		RequiredCheck: "workflow-result",
+		Policy:                DefaultPolicy(),
+		Verify:                []string{"mise", "run", "check"},
+		RequiredCheck:         "workflow-result",
+		ExternalReviewCheck:   "CodeRabbit",
+		ExternalReviewAuthors: []string{"coderabbitai"},
 	}
 	data, err := os.ReadFile(filepath.Join(baseDir, ".agent-harness", "policy.json"))
 	if errors.Is(err, os.ErrNotExist) {
@@ -145,6 +150,9 @@ func LoadRepoConfig(baseDir string) (RepoConfig, error) {
 		StopPaths     []string `json:"stop_paths"`
 		Verify        []string `json:"verify"`
 		RequiredCheck string   `json:"required_check"`
+		// "none" を指定すると外部レビューを待たない。
+		ExternalReviewCheck   string   `json:"external_review_check"`
+		ExternalReviewAuthors []string `json:"external_review_authors"`
 	}
 	if err := json.Unmarshal(data, &file); err != nil {
 		return config, fmt.Errorf(".agent-harness/policy.json: %w", err)
@@ -155,6 +163,16 @@ func LoadRepoConfig(baseDir string) (RepoConfig, error) {
 	}
 	if file.RequiredCheck != "" {
 		config.RequiredCheck = file.RequiredCheck
+	}
+	switch file.ExternalReviewCheck {
+	case "":
+	case "none":
+		config.ExternalReviewCheck = ""
+	default:
+		config.ExternalReviewCheck = file.ExternalReviewCheck
+	}
+	if len(file.ExternalReviewAuthors) > 0 {
+		config.ExternalReviewAuthors = file.ExternalReviewAuthors
 	}
 	return config, nil
 }

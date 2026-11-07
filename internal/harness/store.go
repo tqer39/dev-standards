@@ -29,31 +29,32 @@ const (
 
 // Record は 1 タスクの実行記録である。agent-telemetry もこの JSON を読む。
 type Record struct {
-	RunID            string    `json:"run_id"`
-	Repo             string    `json:"repo"`
-	Base             string    `json:"base"`
-	BaseSHA          string    `json:"base_sha"`
-	AcceptanceSHA    string    `json:"acceptance_sha"`
-	Title            string    `json:"title"`
-	Kind             string    `json:"kind"`
-	Criteria         string    `json:"criteria"`
-	Task             string    `json:"task"`
-	Agent            string    `json:"agent"`
-	Model            string    `json:"model"`
-	Effort           string    `json:"effort"`
-	ReviewerModel    string    `json:"reviewer_model"`
-	Status           Status    `json:"status"`
-	StopReason       string    `json:"stop_reason,omitempty"`
-	Pinned           []string  `json:"pinned,omitempty"`
-	Repairs          int       `json:"repairs"`
-	Round            int       `json:"round"`
-	PR               int       `json:"pr,omitempty"`
-	HeadSHA          string    `json:"head_sha,omitempty"`
-	MergeSHA         string    `json:"merge_sha,omitempty"`
-	RevertPR         int       `json:"revert_pr,omitempty"`
-	FirstRoundPassed bool      `json:"first_round_passed"`
-	StartedAt        time.Time `json:"started_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	RunID            string      `json:"run_id"`
+	Repo             string      `json:"repo"`
+	Base             string      `json:"base"`
+	BaseSHA          string      `json:"base_sha"`
+	AcceptanceSHA    string      `json:"acceptance_sha"`
+	Title            string      `json:"title"`
+	Kind             string      `json:"kind"`
+	Criteria         string      `json:"criteria"`
+	Task             string      `json:"task"`
+	Agent            string      `json:"agent"`
+	Model            string      `json:"model"`
+	Effort           string      `json:"effort"`
+	ReviewerModel    string      `json:"reviewer_model"`
+	Status           Status      `json:"status"`
+	StopReason       string      `json:"stop_reason,omitempty"`
+	Pinned           []string    `json:"pinned,omitempty"`
+	FedThreads       []FedThread `json:"fed_threads,omitempty"`
+	Repairs          int         `json:"repairs"`
+	Round            int         `json:"round"`
+	PR               int         `json:"pr,omitempty"`
+	HeadSHA          string      `json:"head_sha,omitempty"`
+	MergeSHA         string      `json:"merge_sha,omitempty"`
+	RevertPR         int         `json:"revert_pr,omitempty"`
+	FirstRoundPassed bool        `json:"first_round_passed"`
+	StartedAt        time.Time   `json:"started_at"`
+	UpdatedAt        time.Time   `json:"updated_at"`
 }
 
 type Store struct{ Root string }

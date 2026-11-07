@@ -47,6 +47,7 @@
 | `internal/harness/scan.go` | 秘密情報スキャン |
 | `internal/harness/agent.go` | Herdr 経由の起動と待機 |
 | `internal/harness/github.go` | PR、ステータス、チェック、マージ |
+| `internal/harness/external.go` | 外部レビューのスレッドの取得、分類、解決（実装時に追加） |
 | `internal/harness/orchestrate.go` | 状態機械 |
 | `docs/agent-harness.md` | 運用手順 |
 
@@ -4916,6 +4917,8 @@ Expected: `exit=0`、状態 `completed`。PR がマージされ、PR の作成�
 | 秘密情報 | `key.txt` に `ghp_` とランダムな英数字 36 文字からなる架空の値を書く（`EXAMPLE` を含む値は検出されない） | `exit=4`、**PR もブランチも作られない** |
 | CI の失敗と修正 | `status.txt` を `bad` に変える | 修正が 2 回まで試みられ、最終的に合格するか `exit=4` で止まる |
 | 差分なし | 何も変更しないよう指示する | `exit=4`、差分なしが理由 |
+| 外部レビューの指摘 | CodeRabbit を導入したリポジトリで、指摘が付きやすい変更を指示する | 指摘が実装担当に渡り、修正後にスレッドが解決されてマージされる |
+| 人間のコメント | 実行中に PR の差分へコメントする | `exit=4`、未マージ |
 
 - [ ] **Step 5: revert を確認する**
 
