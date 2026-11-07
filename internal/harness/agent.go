@@ -155,6 +155,7 @@ func (h *Herdr) wait(ctx context.Context, name string) (waitState, error) {
 // WaitImplementer は結果ファイル、端末の終了、画面の順に確認する。
 func (h *Herdr) WaitImplementer(ctx context.Context, rec *Record, work string, limit time.Duration) (ImplOutcome, Result, error) {
 	deadline := time.Now().Add(limit)
+	trustAnswered := false
 	for {
 		result, ok, err := ReadResult(work, rec.RunID, rec.Round)
 		if err != nil {
@@ -178,7 +179,15 @@ func (h *Herdr) WaitImplementer(ctx context.Context, rec *Record, work string, l
 			return ImplQuota, Result{}, nil
 		}
 		if trustPattern.MatchString(screen) {
-			return ImplBlocked, Result{}, nil
+			// -c の信頼設定は対話セッションで効かない。ハーネスが基準ブランチから作った
+			// clone で、フックは無効、.codex への書き込みも拒否されるので 1 度だけ承認する。
+			if trustAnswered {
+				return ImplBlocked, Result{}, nil
+			}
+			if _, err := h.Run.Run(ctx, Cmd{Name: h.HC, Args: []string{"keys", implName(rec), "enter"}}); err != nil {
+				return 0, Result{}, err
+			}
+			trustAnswered = true
 		}
 		if !time.Now().Before(deadline) {
 			return ImplTimeout, Result{}, nil

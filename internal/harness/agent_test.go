@@ -74,6 +74,19 @@ func TestWaitImplementerDetectsTrustPromptAndExit(t *testing.T) {
 	if err != nil || outcome != ImplBlocked {
 		t.Fatalf("trust: outcome=%v err=%v", outcome, err)
 	}
+	// 自分で作った clone なので 1 度だけ承認し、繰り返すなら止める。
+	keys := 0
+	for _, call := range runner.calls {
+		if len(call.Args) > 0 && call.Args[0] == "keys" {
+			keys++
+			if strings.Join(call.Args, " ") != "keys impl-r1 enter" {
+				t.Fatalf("args=%v", call.Args)
+			}
+		}
+	}
+	if keys != 1 {
+		t.Fatalf("keys=%d", keys)
+	}
 	runner = &scriptRunner{responses: map[string]response{"hc wait": {out: `{"ended":true,"exit_code":1}`}}}
 	outcome, _, err = herdrFor(runner).WaitImplementer(context.Background(), &Record{RunID: "r1"}, t.TempDir(), time.Minute)
 	if err != nil || outcome != ImplExited {
