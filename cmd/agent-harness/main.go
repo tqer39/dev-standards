@@ -155,9 +155,19 @@ func resolve(name string) (string, error) {
 
 func miseWhich(name string) (string, error) {
 	// 止まると run や doctor が待ち続けるので、上限を設ける。
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	return commandOutput(30*time.Second, "mise", "which", name)
+}
+
+func commandOutput(limit time.Duration, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "mise", "which", name).Output()
+	cmd := exec.CommandContext(ctx, name, args...)
+	// 子の子が出力を開いたまま残ると Wait が戻らないので、読み取りの待機も打ち切る。
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if err != nil && ctx.Err() != nil {
+		return "", fmt.Errorf("%s が %s 以内に終わりません: %w", name, limit, ctx.Err())
+	}
 	if err != nil {
 		return "", err
 	}
