@@ -142,3 +142,50 @@ func TestCommandOutputReturnsPath(t *testing.T) {
 		t.Fatalf("got=%q err=%v", got, err)
 	}
 }
+
+func TestSetupProfileAcceptsTrustAddedByCodex(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	if err := installProfile(); err != nil {
+		t.Fatal(err)
+	}
+	path := dir + "/.codex/agent-harness.config.toml"
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = file.WriteString("\n[projects.\"" + dir + "/workspace/tqer39/n-worktrees/agent-20261108-053323-f956\"]\ntrust_level = \"trusted\"\n")
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := installProfile(); err != nil {
+		t.Fatalf("doctor fails after Codex trusted a harness clone: %v", err)
+	}
+}
+
+func TestRunStopsBeforeCloningWhenModelIsUnavailable(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	// ChatGPT 認証の古い CLI と同じく、既定のモデルを一覧に含めない codex を置く。
+	codex := dir + "/codex"
+	script := "#!/bin/sh\necho '{\"models\":[{\"slug\":\"gpt-5.6-sol\"}]}'\n"
+	if err := os.WriteFile(codex, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	task := dir + "/task.md"
+	if err := os.WriteFile(task, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := dispatch([]string{"run", "--repo", "o/n", "--title", "t", "--task-file", task, "--criteria-file", task, "--approved-by-human"}, &out)
+	if err == nil || !strings.Contains(err.Error(), defaultModel) || !strings.Contains(err.Error(), "gpt-5.6-sol") {
+		t.Fatalf("err=%v", err)
+	}
+	if _, statErr := os.Stat(dir + "/.local/state/agent-harness"); !os.IsNotExist(statErr) {
+		t.Fatalf("run prepared state before checking the model: %v", statErr)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"io"
@@ -182,5 +183,56 @@ func TestAppTokensIncludesGitHubMessage(t *testing.T) {
 	}
 	if _, err := tokens.Token(context.Background()); err == nil || !strings.Contains(err.Error(), "Integration not found") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+// slowSecrets は読み取りのたびに時計を進め、op read が長く止まった状態を再現する。
+type slowSecrets struct {
+	values map[string]string
+	clock  *time.Time
+}
+
+func (s slowSecrets) Read(_ context.Context, ref string) (string, error) {
+	*s.clock = s.clock.Add(20 * time.Minute)
+	return s.values[ref], nil
+}
+
+func TestAppTokensSignsJWTWithTimeAfterReadingSecrets(t *testing.T) {
+	clock := time.Unix(1_800_000_000, 0)
+	var issued int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), ".")
+		data, err := base64.RawURLEncoding.DecodeString(parts[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var claims struct {
+			IAT int64 `json:"iat"`
+		}
+		if err := json.Unmarshal(data, &claims); err != nil {
+			t.Fatal(err)
+		}
+		issued = claims.IAT
+		switch r.URL.Path {
+		case "/repos/o/n/installation":
+			io.WriteString(w, `{"id":42,"permissions":{"contents":"write","pull_requests":"write","statuses":"write","metadata":"read","checks":"read","actions":"read"}}`)
+		default:
+			io.WriteString(w, `{"token":"short-lived"}`)
+		}
+	}))
+	defer server.Close()
+	tokens := &AppTokens{
+		Secrets: slowSecrets{values: map[string]string{AppIDRef: "123", AppKeyRef: testKeyPEM(t)}, clock: &clock},
+		Repo:    "o/n",
+		API:     server.URL,
+		HTTP:    server.Client(),
+		Now:     func() time.Time { return clock },
+	}
+	if _, err := tokens.Token(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// 2 回の読み取りで 40 分進んだ後の時刻で署名する。読み取り前の時刻だと exp が過去になる。
+	if want := clock.Add(-time.Minute).Unix(); issued != want {
+		t.Fatalf("iat=%d want %d", issued, want)
 	}
 }

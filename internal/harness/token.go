@@ -104,6 +104,8 @@ func (a *AppTokens) Token(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// op read が長く止まることがあるので、署名の直前の時刻で iat と exp を決める。
+	now = a.Now()
 	jwt, err := signJWT(appID, keyPEM, now)
 	if err != nil {
 		return "", err

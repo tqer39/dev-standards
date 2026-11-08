@@ -17,6 +17,7 @@ bin/agent-harness doctor --repo <owner>/<name>
 
 `bin/agent-harness` に埋め込んだ権限プロファイルが変わると、`doctor` の「Codex の権限プロファイル」が FAIL になる。
 差分を確認してから、人間が次を実行する。API キー用ホームの複製も更新する。
+Codex が書き足す作業用 clone（`*-worktrees/agent-<run_id>`）の `trust_level = "trusted"` だけの `projects` 節は、比較で無視する。
 
 ```sh
 mv ~/.codex/agent-harness.config.toml ~/.codex/agent-harness.config.toml.bak
@@ -37,6 +38,12 @@ bin/agent-harness run \
 
 固定する受入テストがあれば `--acceptance-patch tests.patch` を追加する。
 実装担当の画面は Herdr で `impl-<run_id>` として確認できる。
+
+`run` と `doctor` は、`--model`（既定は `gpt-6.1-sol`）を `codex debug models` の一覧で確認する。
+使えるモデルは認証方式と Codex CLI の版で変わる。一覧に無い場合は Codex CLI を更新するか、`--model` で一覧のモデルを指定する。
+
+利用先の checkout に `.standards/cache/dev-standards` があれば、作業用 clone にも複製する。
+複製しないと、`mise run check` の `standards:check` が失敗する。
 
 | 終了コード | 意味 | 対応 |
 | --- | --- | --- |

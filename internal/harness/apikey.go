@@ -3,7 +3,6 @@
 package harness
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -71,7 +70,7 @@ func APIKeyProfileCurrent(home string, profile []byte) error {
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(current, profile) {
+	if !ProfileMatches(current, profile) {
 		return errors.New("API キー用ホームの権限プロファイルが古いです。agent-harness setup-api-key を再実行してください")
 	}
 	return nil
