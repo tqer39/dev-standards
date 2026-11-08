@@ -164,13 +164,14 @@ func sandboxEnv(dir string) []string {
 }
 
 // goProxy は既存のモジュールキャッシュを読み取り専用で先に使う。無いものは許可済みの proxy.golang.org から取る。
+// 404 以外の読み取りエラーでもモジュールの取得が次に進むように、"," ではなく "|" で区切る。
 func goProxy() string {
 	const proxy = "https://proxy.golang.org"
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return proxy
 	}
-	return "file://" + filepath.Join(home, "go", "pkg", "mod", "cache", "download") + "," + proxy
+	return "file://" + filepath.Join(home, "go", "pkg", "mod", "cache", "download") + "|" + proxy
 }
 
 // Verify はリポジトリの検証をサンドボックス内で実行する。

@@ -231,9 +231,13 @@ func TestStartImplementerGetsVerifyEnvironment(t *testing.T) {
 	if err := herdrFor(runner).StartImplementer(context.Background(), &Record{RunID: "r1"}, "/work", "task"); err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.Join(runner.calls[1].Args, " ")
-	if !strings.Contains(joined, "-- /usr/bin/env "+strings.Join(sandboxEnv("/work"), " ")+" /abs/codex") {
-		t.Fatalf("args=%s", joined)
+	// hc は引数ごとに渡すので、結合した文字列ではなく要素の境界も比較する。
+	args := runner.calls[1].Args
+	start := slices.Index(args, "--")
+	want := append([]string{"--", "/usr/bin/env"}, sandboxEnv("/work")...)
+	want = append(want, "/abs/codex")
+	if start < 0 || len(args)-start < len(want) || !slices.Equal(args[start:start+len(want)], want) {
+		t.Fatalf("args=%q", args)
 	}
 }
 
