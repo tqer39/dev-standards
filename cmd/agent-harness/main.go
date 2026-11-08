@@ -308,6 +308,9 @@ func runCommand(args []string, out io.Writer) error {
 			return err
 		}
 	}
+	if err := updateCodex(out); err != nil {
+		return err
+	}
 	// 使えないモデルでは実装担当が起動直後に止まるので、clone を作る前に確認する。
 	if err := checkModel(*codexAuth, selected.Model); err != nil {
 		return err
@@ -326,6 +329,31 @@ func runCommand(args []string, out io.Writer) error {
 	fmt.Fprintf(out, "実行 ID: %s\n", rec.RunID)
 	err = orchestrator.Run(context.Background(), rec, acceptance, *approved)
 	return report(out, rec, err)
+}
+
+// updateCodex は作業の前に Codex CLI を最新の版にする。
+func updateCodex(out io.Writer) error {
+	mise, err := resolve("mise")
+	if err != nil {
+		return err
+	}
+	// OSRunner は環境変数を絞るので、利用者の mise の設定を指す値だけ渡す。
+	var env []string
+	for _, key := range []string{"MISE_CONFIG_FILE", "MISE_GLOBAL_CONFIG_FILE", "MISE_ENV"} {
+		if value, ok := os.LookupEnv(key); ok {
+			env = append(env, key+"="+value)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	from, to, err := harness.UpdateCodex(ctx, harness.OSRunner{}, mise, env)
+	if err != nil {
+		return err
+	}
+	if to != "" {
+		fmt.Fprintf(out, "Codex CLI を %s から %s に更新しました。\n", from, to)
+	}
+	return nil
 }
 
 // checkModel は実行と同じ認証方式と Codex の実体で、モデルを使えるかを確認する。

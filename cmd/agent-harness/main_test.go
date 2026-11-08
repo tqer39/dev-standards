@@ -175,6 +175,9 @@ func TestRunStopsBeforeCloningWhenModelIsUnavailable(t *testing.T) {
 	if err := os.WriteFile(codex, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(dir+"/mise", []byte("#!/bin/sh\necho '{}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("PATH", dir)
 	task := dir + "/task.md"
 	if err := os.WriteFile(task, []byte("x\n"), 0o644); err != nil {
@@ -187,5 +190,39 @@ func TestRunStopsBeforeCloningWhenModelIsUnavailable(t *testing.T) {
 	}
 	if _, statErr := os.Stat(dir + "/.local/state/agent-harness"); !os.IsNotExist(statErr) {
 		t.Fatalf("run prepared state before checking the model: %v", statErr)
+	}
+}
+
+func TestRunUpdatesCodexBeforeCheckingModel(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("MISE_CONFIG_FILE", dir+"/config.toml")
+	// 更新するまで既定のモデルを一覧に含めない、古い codex を置く。
+	mise := "#!/bin/sh\n" +
+		"[ \"$MISE_CONFIG_FILE\" = \"" + dir + "/config.toml\" ] || { echo '{}'; exit 0; }\n" +
+		"case \"$1\" in\n" +
+		"outdated) echo '{\"npm:@openai/codex\":{\"current\":\"0.148.0\",\"latest\":\"0.167.0\"}}' ;;\n" +
+		"upgrade) touch " + dir + "/upgraded ;;\n" +
+		"esac\n"
+	codex := "#!/bin/sh\n" +
+		"[ -e " + dir + "/upgraded ] && echo '{\"models\":[{\"slug\":\"" + defaultModel + "\"}]}' || echo '{\"models\":[]}'\n"
+	for name, script := range map[string]string{"mise": mise, "codex": codex} {
+		if err := os.WriteFile(dir+"/"+name, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir+":/bin:/usr/bin")
+	task := dir + "/task.md"
+	if err := os.WriteFile(task, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := dispatch([]string{"run", "--repo", "o/n", "--title", "t", "--task-file", task, "--criteria-file", task, "--approved-by-human"}, &out)
+	if !strings.Contains(out.String(), "0.148.0 から 0.167.0 に更新") {
+		t.Fatalf("out=%s err=%v", out.String(), err)
+	}
+	// モデルの確認は更新後の CLI で通り、先の準備で止まる。
+	if err != nil && strings.Contains(err.Error(), defaultModel) {
+		t.Fatalf("model was checked before the update: %v", err)
 	}
 }

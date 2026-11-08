@@ -39,6 +39,7 @@ bin/agent-harness run \
 固定する受入テストがあれば `--acceptance-patch tests.patch` を追加する。
 実装担当の画面は Herdr で `impl-<run_id>` として確認できる。
 
+`run` は作業の前に、mise の Codex CLI（`npm:@openai/codex`）が古ければ `mise upgrade` で更新する。
 `run` と `doctor` は、`--model`（既定は `gpt-6.1-sol`）を `codex debug models` の一覧で確認する。
 使えるモデルは認証方式と Codex CLI の版で変わる。一覧に無い場合は Codex CLI を更新するか、`--model` で一覧のモデルを指定する。
 
