@@ -337,18 +337,20 @@ func updateCodex(out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// OSRunner は環境変数を絞るので、利用者の mise の設定を指す値だけ渡す。
+	// OSRunner は環境変数を絞るので、利用者の mise の設定とインストール先を指す値を渡す。
 	var env []string
-	for _, key := range []string{"MISE_CONFIG_FILE", "MISE_GLOBAL_CONFIG_FILE", "MISE_ENV"} {
-		if value, ok := os.LookupEnv(key); ok {
-			env = append(env, key+"="+value)
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "MISE_") {
+			env = append(env, kv)
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	from, to, err := harness.UpdateCodex(ctx, harness.OSRunner{}, mise, env)
 	if err != nil {
-		return err
+		// レジストリに届かなくても、今の CLI でモデルを使えるなら続ける。使えるかは checkModel が判定する。
+		fmt.Fprintf(out, "Codex CLI を更新できないので、今の版で続けます: %v\n", err)
+		return nil
 	}
 	if to != "" {
 		fmt.Fprintf(out, "Codex CLI を %s から %s に更新しました。\n", from, to)
