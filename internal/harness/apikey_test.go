@@ -83,4 +83,15 @@ func TestAPIKeyProfileCurrent(t *testing.T) {
 	if err := APIKeyProfileCurrent(home, []byte("old\n"), "/w"); err != nil {
 		t.Fatal(err)
 	}
+	// Codex が作業用 clone の信頼設定を書き足しても、古いとは判定しない。
+	trusted := "old\n\n[projects.\"/w/n-worktrees/agent-20261108-053323-f956\"]\ntrust_level = \"trusted\"\n"
+	if err := os.WriteFile(filepath.Join(home, "agent-harness.config.toml"), []byte(trusted), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := APIKeyProfileCurrent(home, []byte("old\n"), "/w"); err != nil {
+		t.Fatalf("trust for a harness clone was treated as stale: %v", err)
+	}
+	if err := APIKeyProfileCurrent(home, []byte("old\n"), "/other"); err == nil {
+		t.Fatal("trust outside the work root was ignored")
+	}
 }
