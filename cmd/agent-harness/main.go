@@ -154,11 +154,29 @@ func resolve(name string) (string, error) {
 }
 
 func miseWhich(name string) (string, error) {
-	out, err := exec.Command("mise", "which", name).Output()
+	// 止まると run や doctor が待ち続けるので、上限を設ける。
+	return commandOutput(30*time.Second, "mise", "which", name)
+}
+
+func commandOutput(limit time.Duration, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	// 子の子が出力を開いたまま残ると Wait が戻らないので、読み取りの待機も打ち切る。
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	result := strings.TrimSpace(string(out))
+	if err != nil && ctx.Err() != nil {
+		return "", fmt.Errorf("%s が %s 以内に終わりません: %w", name, limit, ctx.Err())
+	}
+	// ErrWaitDelay は正常に終わった後に子の子が出力を開いていただけなので、得た出力を使う。
+	if errors.Is(err, exec.ErrWaitDelay) && result != "" {
+		return result, nil
+	}
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return result, nil
 }
 
 // realPath は mise の shim を実体に解決する。shim のまま渡すと、Herdr の端末では

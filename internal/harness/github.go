@@ -148,25 +148,32 @@ func (g *GitHub) WaitMerged(ctx context.Context, pr int, sha string) (string, er
 }
 
 // PullRequestMerge は PR の状態とマージコミットを返す。待機後のマージの追跡に使う。
-func (g *GitHub) PullRequestMerge(ctx context.Context, pr int) (string, string, error) {
-	out, err := g.gh(ctx, "pr", "view", strconv.Itoa(pr), "--repo", g.Repo, "--json", "state,mergeCommit")
+func (g *GitHub) PullRequestMerge(ctx context.Context, pr int) (PullRequestState, error) {
+	out, err := g.gh(ctx, "pr", "view", strconv.Itoa(pr), "--repo", g.Repo, "--json", "state,mergeCommit,autoMergeRequest,labels")
 	if err != nil {
-		return "", "", err
+		return PullRequestState{}, err
 	}
-	var state struct {
+	var view struct {
 		State       string `json:"state"`
 		MergeCommit *struct {
 			OID string `json:"oid"`
 		} `json:"mergeCommit"`
+		AutoMergeRequest *struct{} `json:"autoMergeRequest"`
+		Labels           []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
 	}
-	if err := json.Unmarshal([]byte(out), &state); err != nil {
-		return "", "", err
+	if err := json.Unmarshal([]byte(out), &view); err != nil {
+		return PullRequestState{}, err
 	}
-	sha := ""
-	if state.MergeCommit != nil {
-		sha = state.MergeCommit.OID
+	state := PullRequestState{State: view.State, AutoMerge: view.AutoMergeRequest != nil}
+	if view.MergeCommit != nil {
+		state.MergeSHA = view.MergeCommit.OID
 	}
-	return state.State, sha, nil
+	for _, label := range view.Labels {
+		state.NeedsHuman = state.NeedsHuman || label.Name == "needs-human"
+	}
+	return state, nil
 }
 
 func (g *GitHub) MarkNeedsHuman(ctx context.Context, pr int, reason string) error {

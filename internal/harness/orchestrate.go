@@ -56,8 +56,15 @@ type Forge interface {
 	UnresolvedThreads(context.Context, int) ([]ReviewThread, error)
 	ResolveThread(context.Context, string) error
 	WaitExternalReview(context.Context, string, string, time.Duration) error
-	PullRequestMerge(context.Context, int) (string, string, error)
+	PullRequestMerge(context.Context, int) (PullRequestState, error)
 	OpenPullRequest(context.Context, string) (int, error)
+}
+
+type PullRequestState struct {
+	State      string
+	MergeSHA   string
+	AutoMerge  bool
+	NeedsHuman bool
 }
 
 type Scanner interface {
@@ -399,13 +406,13 @@ func (o *Orchestrator) ensurePR(ctx context.Context, head, base, title, body str
 }
 
 func (o *Orchestrator) merge(ctx context.Context, rec *Record, config RepoConfig) error {
-	if err := o.Forge.ArmMerge(ctx, rec.PR, rec.HeadSHA); err != nil {
-		return o.stop(ctx, rec, "auto-merge を有効にできません: "+err.Error())
-	}
-	// 待機の後にマージされても検証できるよう、先に記録する。
+	// 有効化の直後に止まってマージされても Reconcile が検証できるよう、先に記録する。
 	rec.Status = StatusMergeArmed
 	if err := o.Store.Save(rec); err != nil {
 		return err
+	}
+	if err := o.Forge.ArmMerge(ctx, rec.PR, rec.HeadSHA); err != nil {
+		return o.stop(ctx, rec, "auto-merge を有効にできません: "+err.Error())
 	}
 	mergeCtx, cancel := context.WithTimeout(ctx, o.MergeLimit)
 	defer cancel()
@@ -504,13 +511,13 @@ func (o *Orchestrator) reconcile(ctx context.Context, repo string) error {
 
 func (o *Orchestrator) reconcileRecord(ctx context.Context, rec *Record) error {
 	if rec.Status == StatusMergeArmed {
-		state, sha, err := o.Forge.PullRequestMerge(ctx, rec.PR)
+		state, err := o.Forge.PullRequestMerge(ctx, rec.PR)
 		if err != nil {
 			return err
 		}
-		switch state {
+		switch state.State {
 		case "MERGED":
-			rec.MergeSHA = sha
+			rec.MergeSHA = state.MergeSHA
 			rec.Status = StatusMergedUnchecked
 			if err := o.Store.Save(rec); err != nil {
 				return err
@@ -520,6 +527,11 @@ func (o *Orchestrator) reconcileRecord(ctx context.Context, rec *Record) error {
 			rec.StopReason = fmt.Sprintf("PR #%d がマージされずに閉じられました", rec.PR)
 			return o.Store.Save(rec)
 		default:
+			// 記録の直後に止まると auto-merge のない PR が残る。人間が外した可能性もあるので、
+			// 有効にし直さずに判断を任せる。記録は残し、後でマージされたら検証する。
+			if !state.AutoMerge && !state.NeedsHuman {
+				return o.Forge.MarkNeedsHuman(ctx, rec.PR, "auto-merge が有効になっていません。確認してマージするか、閉じてください。")
+			}
 			return nil
 		}
 	}

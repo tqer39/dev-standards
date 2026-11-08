@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunRequiresApprovalAndCriteria(t *testing.T) {
@@ -104,5 +105,29 @@ func TestRealPathResolvesMiseShims(t *testing.T) {
 	failing := func(string) (string, error) { return "", errors.New("not active") }
 	if _, err := realPath("/home/u/.local/share/mise/shims/claude", "claude", failing); err == nil {
 		t.Fatal("an unresolved shim must fail instead of falling back to another version")
+	}
+}
+
+func TestCommandOutputStopsAtLimit(t *testing.T) {
+	// sh を止めても sleep が出力を開いたまま残る。読み取りの待機にも上限がなければ 5 秒待つ。
+	start := time.Now()
+	_, err := commandOutput(200*time.Millisecond, "sh", "-c", "sleep 5; true")
+	if err == nil || !strings.Contains(err.Error(), "以内に終わりません") {
+		t.Fatalf("err=%v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("elapsed=%v", elapsed)
+	}
+}
+
+func TestCommandOutputReturnsPath(t *testing.T) {
+	got, err := commandOutput(5*time.Second, "sh", "-c", "echo /x/bin/tool")
+	if err != nil || got != "/x/bin/tool" {
+		t.Fatalf("got=%q err=%v", got, err)
+	}
+	// 正常に終わった後も、子の子が stderr を開いたまま残ることがある。出力は使う。
+	got, err = commandOutput(5*time.Second, "sh", "-c", "echo /x/bin/tool; sleep 3 >/dev/null &")
+	if err != nil || got != "/x/bin/tool" {
+		t.Fatalf("got=%q err=%v", got, err)
 	}
 }

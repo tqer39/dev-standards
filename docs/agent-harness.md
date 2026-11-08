@@ -77,6 +77,8 @@ Mac の停止などでマージ後の確認が途中で終わった場合は、�
 bin/agent-harness reconcile --repo <owner>/<name>
 ```
 
+auto-merge を有効にする前に止まった PR には `needs-human` が付く。確認してマージするか、閉じる。マージした場合も、次の実行か `reconcile` で main の CI を確認する。
+
 ## 実行記録
 
 `~/.local/state/agent-harness/runs/<run_id>.json` に保存する。
