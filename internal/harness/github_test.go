@@ -52,6 +52,30 @@ func TestWaitCheckReadsConclusion(t *testing.T) {
 	}
 }
 
+func TestWaitCheckRequiresEveryRun(t *testing.T) {
+	// push と pull_request の両方で起動すると、同じ名前の check が 2 件できる。
+	forge, _ := forgeWith(map[string]response{"gh api": {out: `{"check_runs":[{"status":"completed","conclusion":"success"},{"status":"completed","conclusion":"failure"}]}`}})
+	if ok, err := forge.WaitCheck(context.Background(), "abc", "ci"); err != nil || ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	forge, _ = forgeWith(map[string]response{"gh api": {out: `{"check_runs":[{"status":"completed","conclusion":"success"},{"status":"in_progress"}]}`}})
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := forge.WaitCheck(ctx, "abc", "ci"); err == nil {
+		t.Fatal("a running check was ignored")
+	}
+}
+
+func TestWaitCheckEscapesName(t *testing.T) {
+	forge, runner := forgeWith(map[string]response{"gh api": {out: `{"check_runs":[{"status":"completed","conclusion":"success"}]}`}})
+	if _, err := forge.WaitCheck(context.Background(), "abc", "test (ubuntu-latest) & more"); err != nil {
+		t.Fatal(err)
+	}
+	if !runner.called("gh", "check_name=test+%28ubuntu-latest%29+%26+more&filter=latest") {
+		t.Fatalf("calls=%+v", runner.calls)
+	}
+}
+
 func TestWaitCheckStopsAtContextDeadline(t *testing.T) {
 	forge, _ := forgeWith(map[string]response{"gh api": {out: `{"check_runs":[]}`}})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)

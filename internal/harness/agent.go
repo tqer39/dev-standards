@@ -162,6 +162,7 @@ func (h *Herdr) wait(ctx context.Context, name string) (waitState, error) {
 func (h *Herdr) WaitImplementer(ctx context.Context, rec *Record, work string, limit time.Duration) (ImplOutcome, Result, error) {
 	deadline := time.Now().Add(limit)
 	trustAnswered := false
+	previous := ""
 	for {
 		result, ok, err := ReadResult(work, rec.RunID, rec.Round)
 		if err != nil {
@@ -175,15 +176,25 @@ func (h *Herdr) WaitImplementer(ctx context.Context, rec *Record, work string, l
 			return 0, Result{}, err
 		}
 		if state.Ended {
+			// 待機中に結果を書いて終了した場合は、完了として扱う。
+			result, ok, err = ReadResult(work, rec.RunID, rec.Round)
+			if err != nil {
+				return 0, Result{}, err
+			}
+			if ok {
+				return ImplDone, result, nil
+			}
 			return ImplExited, Result{}, nil
 		}
 		screen, err := h.Run.Run(ctx, Cmd{Name: h.HC, Args: []string{"read", implName(rec), "--lines", "40"}})
 		if err != nil {
 			return 0, Result{}, err
 		}
-		if quotaPattern.MatchString(screen) {
+		// 作業中の出力にも同じ語が出るので、画面が止まっているときだけ利用上限とみなす。
+		if quotaPattern.MatchString(screen) && screen == previous {
 			return ImplQuota, Result{}, nil
 		}
+		previous = screen
 		if trustPattern.MatchString(screen) {
 			// -c の信頼設定は対話セッションで効かない。ハーネスが基準ブランチから作った
 			// clone で、フックは無効、.codex への書き込みも拒否されるので 1 度だけ承認する。

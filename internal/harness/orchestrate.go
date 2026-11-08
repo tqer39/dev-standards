@@ -134,6 +134,9 @@ func (o *Orchestrator) Resume(ctx context.Context, rec *Record) error {
 	defer unlock()
 	paths := o.Tree.PathsFor(rec)
 	rec.Status = StatusImplementing
+	if rec.ReviewPending {
+		return o.loop(ctx, rec, paths)
+	}
 	alive, err := o.Agents.ImplementerAlive(ctx, rec)
 	if err != nil {
 		return err
@@ -172,8 +175,13 @@ func (o *Orchestrator) enter(ctx context.Context, repo string) (func(), error) {
 }
 
 func (o *Orchestrator) loop(ctx context.Context, rec *Record, paths Paths) error {
+	step := o.round
+	if rec.ReviewPending {
+		step = o.reviewAgain
+	}
 	for {
-		feedback, err := o.round(ctx, rec, paths)
+		feedback, err := step(ctx, rec, paths)
+		step = o.round
 		if err != nil {
 			return err
 		}
@@ -271,6 +279,16 @@ func (o *Orchestrator) round(ctx context.Context, rec *Record, paths Paths) (str
 	return o.review(ctx, rec, paths, config)
 }
 
+// reviewAgain はレビュー担当の利用枠待ちから、レビューだけをやり直す。
+func (o *Orchestrator) reviewAgain(ctx context.Context, rec *Record, paths Paths) (string, error) {
+	rec.ReviewPending = false
+	config, err := o.Config(paths.Review)
+	if err != nil {
+		return "", o.stop(ctx, rec, "基準ブランチの設定を読めません: "+err.Error())
+	}
+	return o.review(ctx, rec, paths, config)
+}
+
 func (o *Orchestrator) inspect(ctx context.Context, rec *Record, config RepoConfig) ([]string, error) {
 	fromBase, err := o.Tree.Changes(ctx, rec, rec.BaseSHA)
 	if err != nil {
@@ -293,8 +311,14 @@ func (o *Orchestrator) inspect(ctx context.Context, rec *Record, config RepoConf
 
 func (o *Orchestrator) review(ctx context.Context, rec *Record, paths Paths, config RepoConfig) (string, error) {
 	sha := rec.HeadSHA
-	ok, err := o.Forge.WaitCheck(ctx, sha, config.RequiredCheck)
+	// 名前の誤りやワークフローの未起動で現れないと、ロックを持ったまま待ち続けるので上限を設ける。
+	checkCtx, cancel := context.WithTimeout(ctx, o.RoundLimit)
+	ok, err := o.Forge.WaitCheck(checkCtx, sha, config.RequiredCheck)
+	cancel()
 	if err != nil {
+		if ctx.Err() == nil && checkCtx.Err() != nil {
+			return "", o.stop(ctx, rec, "必須チェックの完了を確認できません: "+err.Error())
+		}
 		return "", err
 	}
 	if !ok {
@@ -326,6 +350,7 @@ func (o *Orchestrator) review(ctx context.Context, rec *Record, paths Paths, con
 	}
 	switch outcome {
 	case ReviewQuota:
+		rec.ReviewPending = true
 		return "", o.waitQuota(rec)
 	case ReviewFailed:
 		return "", o.stop(ctx, rec, "レビューの実行に失敗しました。"+reviewFailureDetail(data))
@@ -437,9 +462,12 @@ func (o *Orchestrator) merge(ctx context.Context, rec *Record, config RepoConfig
 
 // checkMain はマージ後の main を確認し、失敗したら revert する。
 func (o *Orchestrator) checkMain(ctx context.Context, rec *Record, config RepoConfig) error {
-	ok, err := o.Forge.WaitCheck(ctx, rec.MergeSHA, config.RequiredCheck)
+	checkCtx, cancel := context.WithTimeout(ctx, o.MergeLimit)
+	ok, err := o.Forge.WaitCheck(checkCtx, rec.MergeSHA, config.RequiredCheck)
+	cancel()
 	if err != nil {
-		return err
+		// 記録は merged_unchecked のまま残し、次の実行か reconcile で確認し直す。
+		return fmt.Errorf("main の %s を確認できません (%s): %w", config.RequiredCheck, rec.MergeSHA, err)
 	}
 	if ok {
 		rec.Status = StatusCompleted

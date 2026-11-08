@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -67,21 +68,17 @@ func (g *GitHub) SetStatus(ctx context.Context, sha, state, description string) 
 // WaitCheck は指定したチェックの完了を待ち、成功かどうかを返す。
 func (g *GitHub) WaitCheck(ctx context.Context, sha, name string) (bool, error) {
 	for {
-		out, err := g.gh(ctx, "api", "repos/"+g.Repo+"/commits/"+sha+"/check-runs?check_name="+name+"&filter=latest")
+		runs, err := g.checkRuns(ctx, sha, name)
 		if err != nil {
 			return false, err
 		}
-		var data struct {
-			Runs []struct {
-				Status     string `json:"status"`
-				Conclusion string `json:"conclusion"`
-			} `json:"check_runs"`
-		}
-		if err := json.Unmarshal([]byte(out), &data); err != nil {
-			return false, err
-		}
-		if len(data.Runs) > 0 && data.Runs[0].Status == "completed" {
-			return data.Runs[0].Conclusion == "success", nil
+		if len(runs) > 0 && allCompleted(runs) {
+			for _, run := range runs {
+				if run.Conclusion != "success" {
+					return false, nil
+				}
+			}
+			return true, nil
 		}
 		select {
 		case <-ctx.Done():
@@ -89,6 +86,35 @@ func (g *GitHub) WaitCheck(ctx context.Context, sha, name string) (bool, error) 
 		case <-time.After(g.Poll):
 		}
 	}
+}
+
+type checkRun struct {
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
+// checkRuns は同じ名前のチェックをすべて返す。push と pull_request の両方で起動すると複数になる。
+func (g *GitHub) checkRuns(ctx context.Context, sha, name string) ([]checkRun, error) {
+	out, err := g.gh(ctx, "api", "repos/"+g.Repo+"/commits/"+sha+"/check-runs?check_name="+url.QueryEscape(name)+"&filter=latest")
+	if err != nil {
+		return nil, err
+	}
+	var data struct {
+		Runs []checkRun `json:"check_runs"`
+	}
+	if err := json.Unmarshal([]byte(out), &data); err != nil {
+		return nil, err
+	}
+	return data.Runs, nil
+}
+
+func allCompleted(runs []checkRun) bool {
+	for _, run := range runs {
+		if run.Status != "completed" {
+			return false
+		}
+	}
+	return true
 }
 
 // FailedLog は修正の材料になる CI のログを返す。内容は信頼できないデータとして扱う。

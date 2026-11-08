@@ -55,8 +55,10 @@ type Record struct {
 	RevertPR         int         `json:"revert_pr,omitempty"`
 	RevertSHA        string      `json:"revert_sha,omitempty"`
 	FirstRoundPassed bool        `json:"first_round_passed"`
-	StartedAt        time.Time   `json:"started_at"`
-	UpdatedAt        time.Time   `json:"updated_at"`
+	// ReviewPending はレビュー担当の利用枠待ちである。push と PR は済んでいるので、再開時はレビューからやり直す。
+	ReviewPending bool      `json:"review_pending,omitempty"`
+	StartedAt     time.Time `json:"started_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type Store struct{ Root string }

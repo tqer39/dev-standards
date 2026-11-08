@@ -61,4 +61,26 @@ func TestAPIKeyLoggedIn(t *testing.T) {
 	if err := APIKeyLoggedIn(context.Background(), runner, "codex", "/h"); err == nil {
 		t.Fatal("ChatGPT login must not count as API key login")
 	}
+	// 未ログインの案内にも "API key" が含まれることがある。
+	runner = &scriptRunner{responses: map[string]response{"codex login": {out: "Not logged in. Run codex login --with-api-key to use an API key\n"}}}
+	if err := APIKeyLoggedIn(context.Background(), runner, "codex", "/h"); err == nil {
+		t.Fatal("a hint mentioning an API key must not count as login")
+	}
+	runner = &scriptRunner{responses: map[string]response{"codex login": {err: &RunError{Name: "codex", Code: 1, Stderr: "Logged in using an API key - sk-***\n"}}}}
+	if err := APIKeyLoggedIn(context.Background(), runner, "codex", "/h"); err == nil {
+		t.Fatal("a failed status command must not count as login")
+	}
+}
+
+func TestAPIKeyProfileCurrent(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "agent-harness.config.toml"), []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := APIKeyProfileCurrent(home, []byte("new\n")); err == nil || !strings.Contains(err.Error(), "setup-api-key") {
+		t.Fatalf("err=%v", err)
+	}
+	if err := APIKeyProfileCurrent(home, []byte("old\n")); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -151,21 +151,13 @@ func (g *GitHub) ResolveThread(ctx context.Context, id string) error {
 func (g *GitHub) WaitExternalReview(ctx context.Context, sha, name string, grace time.Duration) error {
 	deadline := time.Now().Add(grace)
 	for {
-		out, err := g.gh(ctx, "api", "repos/"+g.Repo+"/commits/"+sha+"/check-runs?check_name="+name+"&filter=latest")
+		runs, err := g.checkRuns(ctx, sha, name)
 		if err != nil {
 			return err
 		}
-		var data struct {
-			Runs []struct {
-				Status string `json:"status"`
-			} `json:"check_runs"`
-		}
-		if err := json.Unmarshal([]byte(out), &data); err != nil {
-			return err
-		}
-		if len(data.Runs) > 0 {
+		if len(runs) > 0 {
 			// 結果は問わない。指摘の有無はスレッドで判断する。
-			if data.Runs[0].Status == "completed" {
+			if allCompleted(runs) {
 				return nil
 			}
 		} else if !time.Now().Before(deadline) {

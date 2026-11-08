@@ -174,11 +174,12 @@ export GIT_OBJECT_DIRECTORY="$PWD/.agent-run/objects"
 export GIT_ALTERNATE_OBJECT_DIRECTORIES="$PWD/.git/objects"
 git read-tree HEAD
 git add -A
-git diff --cached --binary --no-renames HEAD`
+# 上限を超えた分は読み込まない。1 バイト多く出し、超えたことを呼び出し側で判定する。
+git diff --cached --binary --no-renames HEAD | head -c %d`
 
 // Export は差分をサンドボックス内で出力する。インデックスとオブジェクトは .agent-run に置く。
 func (t *GitTree) Export(ctx context.Context, work string) ([]byte, error) {
-	out, err := t.sandbox(ctx, work, nil, "sh", "-c", exportScript)
+	out, err := t.sandbox(ctx, work, nil, "sh", "-c", fmt.Sprintf(exportScript, maxPatchBytes+1))
 	if err != nil {
 		return nil, err
 	}
