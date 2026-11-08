@@ -40,6 +40,10 @@ expect_read_denied "gh の認証情報の読み取り" "$HOME/.config/gh/hosts.y
 expect_read_denied "SSH の読み取り"          "$HOME/.ssh"
 expect_read_denied "Codex の認証の読み取り"  "$HOME/.codex/auth.json"
 expect_read_denied "Codex の設定の読み取り"  "$HOME/.codex/config.toml"
+# 環境によって存在しないものは、存在するときだけ確認する。
+for path in .codex/sessions .codex/history.jsonl .npmrc .netrc .git-credentials .pypirc .docker .kube .gnupg .config/gcloud; do
+  if [ -e "$HOME/$path" ]; then expect_read_denied "~/$path の読み取り" "$HOME/$path"; fi
+done
 
 # API キー専用の Codex ホームは状態ディレクトリの下にある。試験用のファイルで確認する。
 state="$HOME/.local/state/agent-harness"
@@ -77,7 +81,8 @@ else
   while IFS= read -r name; do
     [ -n "$name" ] && overrides+=(-c "mcp_servers.$name.enabled=false")
   done < <(printf '%s' "$servers" | python3 -c 'import json, sys; [print(s["name"]) for s in json.load(sys.stdin) if s.get("enabled")]')
-  remaining="$(codex -p agent-harness "${overrides[@]}" mcp list --json 2>/dev/null | python3 -c 'import json, sys; print(sum(1 for s in json.load(sys.stdin) if s.get("enabled")))')"
+  # macOS の bash 3.2 は set -u で空の配列を展開できない。
+  remaining="$(codex -p agent-harness ${overrides[@]+"${overrides[@]}"} mcp list --json 2>/dev/null | python3 -c 'import json, sys; print(sum(1 for s in json.load(sys.stdin) if s.get("enabled")))')"
   if [ "$remaining" = "0" ]; then echo "PASS MCP の無効化"; else echo "FAIL MCP の無効化"; failed=1; fi
 fi
 

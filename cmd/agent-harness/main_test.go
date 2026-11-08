@@ -19,6 +19,17 @@ func TestRunRequiresApprovalAndCriteria(t *testing.T) {
 	}
 }
 
+func TestRepoIsRequired(t *testing.T) {
+	// 空の名前で停止の解除やトークンの発行に進まないよう、実際の状態ディレクトリから離す。
+	t.Setenv("HOME", t.TempDir())
+	for _, command := range []string{"reconcile", "clear-stop"} {
+		var out bytes.Buffer
+		if err := dispatch([]string{command}, &out); err == nil || !strings.Contains(err.Error(), "--repo") {
+			t.Errorf("%s: err=%v", command, err)
+		}
+	}
+}
+
 func TestUnknownCommand(t *testing.T) {
 	var out bytes.Buffer
 	if err := dispatch([]string{"unknown"}, &out); err == nil {

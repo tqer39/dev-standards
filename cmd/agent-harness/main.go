@@ -355,6 +355,9 @@ func reconcileCommand(args []string, out io.Writer) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if *repo == "" {
+		return errors.New("--repo は必須です")
+	}
 	orchestrator, err := build(*repo, "")
 	if err != nil {
 		return err
@@ -371,6 +374,9 @@ func clearStop(args []string, out io.Writer) error {
 	repo := flags.String("repo", "", "owner/name")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *repo == "" {
+		return errors.New("--repo は必須です")
 	}
 	root, err := stateRoot()
 	if err != nil {
@@ -436,10 +442,17 @@ func doctor(args []string, out io.Writer) error {
 	check("Codex の権限プロファイル", installProfile())
 	codexHome, err := codexHomeFor(*codexAuth)
 	if err == nil && codexHome != "" {
-		err = harness.APIKeyLoggedIn(context.Background(), harness.OSRunner{}, "codex", codexHome)
+		// 実行時と同じ実体で確認する。shim のままだと別の版で判定することがある。
+		var codex string
+		if codex, err = resolve("codex"); err == nil {
+			err = harness.APIKeyLoggedIn(context.Background(), harness.OSRunner{}, codex, codexHome)
+		}
 	}
 	if *codexAuth != "chatgpt" {
 		check("Codex の API キー", err)
+		if codexHome != "" {
+			check("API キー用ホームの権限プロファイル", harness.APIKeyProfileCurrent(codexHome, harnessassets.CodexProfile))
+		}
 	}
 	// 実際のレビューと同じ実体で確認する。
 	claude, err := resolve("claude")

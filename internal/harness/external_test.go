@@ -81,6 +81,12 @@ func TestWaitExternalReviewStopsAtDeadlineWhileRunning(t *testing.T) {
 	if err := forge.WaitExternalReview(ctx, "abc", "CodeRabbit", 0); err == nil {
 		t.Fatal("running review was ignored")
 	}
+	forge, _ = forgeWith(map[string]response{"gh api": {out: `{"check_runs":[{"status":"completed"},{"status":"in_progress"}]}`}})
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	if err := forge.WaitExternalReview(ctx, "abc", "CodeRabbit", 0); err == nil {
+		t.Fatal("a running review was ignored")
+	}
 }
 
 func TestClassifyThreads(t *testing.T) {

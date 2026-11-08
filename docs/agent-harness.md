@@ -13,6 +13,18 @@ bin/agent-harness doctor --repo <owner>/<name>
 
 1Password の Vault、サービスアカウント、GitHub App は人間が作成する。
 
+### 権限プロファイルを更新する
+
+`bin/agent-harness` に埋め込んだ権限プロファイルが変わると、`doctor` の「Codex の権限プロファイル」が FAIL になる。
+差分を確認してから、人間が次を実行する。API キー用ホームの複製も更新する。
+
+```sh
+mv ~/.codex/agent-harness.config.toml ~/.codex/agent-harness.config.toml.bak
+bin/agent-harness setup
+scripts/agent-harness-probe.sh
+bin/agent-harness setup-api-key   # API キーで実行する場合だけ
+```
+
 ## タスクの実行
 
 人間が受入条件を承認してから実行する。

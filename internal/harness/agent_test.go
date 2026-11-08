@@ -4,6 +4,7 @@ package harness
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -91,6 +92,65 @@ func TestWaitImplementerDetectsTrustPromptAndExit(t *testing.T) {
 	outcome, _, err = herdrFor(runner).WaitImplementer(context.Background(), &Record{RunID: "r1"}, t.TempDir(), time.Minute)
 	if err != nil || outcome != ImplExited {
 		t.Fatalf("exit: outcome=%v err=%v", outcome, err)
+	}
+}
+
+// stepRunner は hc の呼び出しごとに応答を変える。
+type stepRunner struct {
+	wait func() string
+	read func() string
+}
+
+func (r *stepRunner) Run(_ context.Context, c Cmd) (string, error) {
+	switch {
+	case len(c.Args) > 0 && c.Args[0] == "wait":
+		return r.wait(), nil
+	case len(c.Args) > 0 && c.Args[0] == "read":
+		return r.read(), nil
+	}
+	return "", nil
+}
+
+func TestWaitImplementerReadsResultWrittenBeforeExit(t *testing.T) {
+	work := t.TempDir()
+	runner := &stepRunner{wait: func() string {
+		// 待機中に結果を書いて終了した。
+		if err := os.MkdirAll(filepath.Join(work, ".agent-run"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(work, ".agent-run", "result.json"), []byte(`{"run_id":"r1","round":0,"status":"done","summary":"s"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return `{"ended":true,"exit_code":0}`
+	}}
+	outcome, result, err := herdrFor(runner).WaitImplementer(context.Background(), &Record{RunID: "r1"}, work, time.Minute)
+	if err != nil || outcome != ImplDone || result.Summary != "s" {
+		t.Fatalf("outcome=%v result=%+v err=%v", outcome, result, err)
+	}
+}
+
+func TestWaitImplementerIgnoresQuotaWordsWhileWorking(t *testing.T) {
+	// レート制限を実装するタスクでは、作業中の画面に同じ語が出る。画面が動いていれば利用上限ではない。
+	work := t.TempDir()
+	reads := 0
+	runner := &stepRunner{
+		wait: func() string { return `{"ended":false,"reason":"timeout"}` },
+		read: func() string {
+			reads++
+			if reads == 3 {
+				if err := os.MkdirAll(filepath.Join(work, ".agent-run"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(work, ".agent-run", "result.json"), []byte(`{"run_id":"r1","round":0,"status":"done","summary":"s"}`), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return fmt.Sprintf("add test: rate limit reached returns 429 (%ds)\n", reads)
+		},
+	}
+	outcome, _, err := herdrFor(runner).WaitImplementer(context.Background(), &Record{RunID: "r1"}, work, time.Minute)
+	if err != nil || outcome != ImplDone {
+		t.Fatalf("outcome=%v err=%v", outcome, err)
 	}
 }
 

@@ -111,6 +111,7 @@ type fakeForge struct {
 	open        map[string]int
 	onArm       func()
 	armErr      error
+	checkBlocks bool
 }
 
 func (f *fakeForge) OpenPullRequest(_ context.Context, head string) (int, error) {
@@ -148,7 +149,11 @@ func (f *fakeForge) SetStatus(_ context.Context, _, state, _ string) error {
 	f.statuses = append(f.statuses, state)
 	return nil
 }
-func (f *fakeForge) WaitCheck(context.Context, string, string) (bool, error) {
+func (f *fakeForge) WaitCheck(ctx context.Context, _, _ string) (bool, error) {
+	if f.checkBlocks {
+		<-ctx.Done()
+		return false, ctx.Err()
+	}
 	if len(f.checks) == 0 {
 		return true, nil
 	}
@@ -317,6 +322,55 @@ func TestReviewerQuotaAlsoWaits(t *testing.T) {
 	orchestrator, rec := newOrchestrator(t, agents, &fakeTree{}, &fakeForge{}, fakeScanner{})
 	if err := orchestrator.Run(context.Background(), rec, nil, true); !errors.Is(err, ErrQuota) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestResumeAfterReviewerQuotaReviewsAgain(t *testing.T) {
+	// 利用枠を超えた時点で push と PR は済んでいる。実装担当に戻すと同じ差分を適用し直す。
+	agents := &fakeAgents{reviewOut: ReviewQuota}
+	tree := &fakeTree{}
+	forge := &fakeForge{mergeResult: "merge"}
+	orchestrator, rec := newOrchestrator(t, agents, tree, forge, fakeScanner{})
+	if err := orchestrator.Run(context.Background(), rec, nil, true); !errors.Is(err, ErrQuota) {
+		t.Fatalf("err=%v", err)
+	}
+	stored, err := orchestrator.Store.Load("r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents.reviewOut, agents.reviews = ReviewDone, [][]byte{[]byte(passVerdict)}
+	if err := orchestrator.Resume(context.Background(), stored); err != nil {
+		t.Fatal(err)
+	}
+	if agents.started != 1 || len(agents.sent) != 0 || tree.commits != 1 || agents.reviewed != 2 || stored.Status != StatusCompleted {
+		t.Fatalf("started=%d sent=%v commits=%d reviewed=%d rec=%+v", agents.started, agents.sent, tree.commits, agents.reviewed, stored)
+	}
+}
+
+func TestRequiredCheckTimeoutStops(t *testing.T) {
+	forge := &fakeForge{checkBlocks: true}
+	orchestrator, rec := newOrchestrator(t, &fakeAgents{}, &fakeTree{}, forge, fakeScanner{})
+	orchestrator.RoundLimit = 20 * time.Millisecond
+	err := orchestrator.Run(context.Background(), rec, nil, true)
+	if !errors.Is(err, ErrStopped) || rec.Status != StatusStopped || len(forge.needsHuman) != 1 {
+		t.Fatalf("err=%v rec=%+v", err, rec)
+	}
+}
+
+func TestMainCheckTimeoutKeepsMergeUnchecked(t *testing.T) {
+	forge := &fakeForge{checkBlocks: true}
+	orchestrator, rec := newOrchestrator(t, &fakeAgents{}, &fakeTree{}, forge, fakeScanner{})
+	orchestrator.MergeLimit = 20 * time.Millisecond
+	rec.Status, rec.MergeSHA = StatusMergedUnchecked, "merge"
+	if err := orchestrator.Store.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := orchestrator.Reconcile(context.Background(), "o/n"); err == nil {
+		t.Fatal("an unconfirmed main check was accepted")
+	}
+	stored, _ := orchestrator.Store.Load("r1")
+	if stored.Status != StatusMergedUnchecked {
+		t.Fatalf("status=%s", stored.Status)
 	}
 }
 

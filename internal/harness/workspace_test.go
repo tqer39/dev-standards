@@ -4,6 +4,7 @@ package harness
 
 import (
 	"context"
+	"crypto/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -162,6 +163,43 @@ func TestExportIgnoresGitHooksFromWorkClone(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("hook from the work clone was executed")
+	}
+}
+
+// outputSize は受け取った出力の最大長を記録する。
+type outputSize struct {
+	inner   Runner
+	largest int
+}
+
+func (r *outputSize) Run(ctx context.Context, c Cmd) (string, error) {
+	out, err := r.inner.Run(ctx, c)
+	r.largest = max(r.largest, len(out))
+	return out, err
+}
+
+func TestExportStopsReadingAtLimit(t *testing.T) {
+	tree, rec := newTree(t, newRemote(t))
+	ctx := context.Background()
+	paths, err := tree.Prepare(ctx, rec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 生成物を大量に作ると、差分全体をメモリに読み込んでから上限を確認することになる。
+	data := make([]byte, 2*maxPatchBytes)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.Work, "big.bin"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	size := &outputSize{inner: tree.Run}
+	tree.Run = size
+	if _, err := tree.Export(ctx, paths.Work); err == nil || !strings.Contains(err.Error(), "上限") {
+		t.Fatalf("err=%v", err)
+	}
+	if size.largest > maxPatchBytes+1 {
+		t.Fatalf("read %d bytes", size.largest)
 	}
 }
 
