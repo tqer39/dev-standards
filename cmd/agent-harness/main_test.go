@@ -142,3 +142,118 @@ func TestCommandOutputReturnsPath(t *testing.T) {
 		t.Fatalf("got=%q err=%v", got, err)
 	}
 }
+
+func TestSetupProfileAcceptsTrustAddedByCodex(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	if err := installProfile(); err != nil {
+		t.Fatal(err)
+	}
+	path := dir + "/.codex/agent-harness.config.toml"
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = file.WriteString("\n[projects.\"" + dir + "/workspace/tqer39/n-worktrees/agent-20261108-053323-f956\"]\ntrust_level = \"trusted\"\n")
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := installProfile(); err != nil {
+		t.Fatalf("doctor fails after Codex trusted a harness clone: %v", err)
+	}
+}
+
+func TestRunStopsBeforeCloningWhenModelIsUnavailable(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	// ChatGPT 認証の古い CLI と同じく、既定のモデルを一覧に含めない codex を置く。
+	codex := dir + "/codex"
+	script := "#!/bin/sh\necho '{\"models\":[{\"slug\":\"gpt-5.6-sol\"}]}'\n"
+	if err := os.WriteFile(codex, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/mise", []byte("#!/bin/sh\necho '{}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	task := dir + "/task.md"
+	if err := os.WriteFile(task, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := dispatch([]string{"run", "--repo", "o/n", "--title", "t", "--task-file", task, "--criteria-file", task, "--approved-by-human"}, &out)
+	if err == nil || !strings.Contains(err.Error(), defaultModel) || !strings.Contains(err.Error(), "gpt-5.6-sol") {
+		t.Fatalf("err=%v", err)
+	}
+	if _, statErr := os.Stat(dir + "/.local/state/agent-harness"); !os.IsNotExist(statErr) {
+		t.Fatalf("run prepared state before checking the model: %v", statErr)
+	}
+}
+
+func TestRunUpdatesCodexBeforeCheckingModel(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("MISE_CONFIG_FILE", dir+"/config.toml")
+	t.Setenv("MISE_DATA_DIR", dir+"/mise-data")
+	log := dir + "/calls.log"
+	// 呼び出しの順を記録する。mise は利用者の設定とインストール先を受け取ったときだけ Codex を管理する。
+	mise := "#!/bin/sh\n" +
+		"echo \"mise $1\" >> " + log + "\n" +
+		"[ \"$MISE_CONFIG_FILE\" = \"" + dir + "/config.toml\" ] && [ \"$MISE_DATA_DIR\" = \"" + dir + "/mise-data\" ] || { echo '{}'; exit 0; }\n" +
+		"[ \"$1\" = outdated ] && echo '{\"npm:@openai/codex\":{\"current\":\"0.148.0\",\"latest\":\"0.167.0\"}}'\n" +
+		"exit 0\n"
+	codex := "#!/bin/sh\n" +
+		"echo \"codex $1\" >> " + log + "\n" +
+		"echo '{\"models\":[{\"slug\":\"" + defaultModel + "\"}]}'\n"
+	for name, script := range map[string]string{"mise": mise, "codex": codex} {
+		if err := os.WriteFile(dir+"/"+name, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// hc などを置かず、build の実行ファイルの解決で確実に止める。
+	t.Setenv("PATH", dir)
+	task := dir + "/task.md"
+	if err := os.WriteFile(task, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := dispatch([]string{"run", "--repo", "o/n", "--title", "t", "--task-file", task, "--criteria-file", task, "--approved-by-human"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "hc") {
+		t.Fatalf("run must stop at build: %v", err)
+	}
+	if !strings.Contains(out.String(), "0.148.0 から 0.167.0 に更新") {
+		t.Fatalf("out=%s", out.String())
+	}
+	calls, readErr := os.ReadFile(log)
+	if readErr != nil || string(calls) != "mise outdated\nmise upgrade\ncodex debug\n" {
+		t.Fatalf("calls=%q err=%v", calls, readErr)
+	}
+}
+
+func TestRunContinuesWhenCodexUpdateFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	scripts := map[string]string{
+		"mise":  "#!/bin/sh\necho 'registry unreachable' >&2\nexit 1\n",
+		"codex": "#!/bin/sh\necho '{\"models\":[{\"slug\":\"" + defaultModel + "\"}]}'\n",
+	}
+	for name, script := range scripts {
+		if err := os.WriteFile(dir+"/"+name, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+	task := dir + "/task.md"
+	if err := os.WriteFile(task, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := dispatch([]string{"run", "--repo", "o/n", "--title", "t", "--task-file", task, "--criteria-file", task, "--approved-by-human"}, &out)
+	// 今の CLI でモデルを使えるので、更新の失敗では止まらず build まで進む。
+	if err == nil || !strings.Contains(err.Error(), "hc") || !strings.Contains(out.String(), "今の版で続けます") {
+		t.Fatalf("out=%s err=%v", out.String(), err)
+	}
+}

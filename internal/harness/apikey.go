@@ -3,7 +3,6 @@
 package harness
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -66,12 +65,12 @@ func APIKeyLoggedIn(ctx context.Context, run Runner, codex, home string) error {
 
 // APIKeyProfileCurrent は専用ホームの権限プロファイルが埋め込みの版と同じかを確認する。
 // setup-api-key の時点の複製なので、更新後に再実行しないと古い制限のまま動く。
-func APIKeyProfileCurrent(home string, profile []byte) error {
+func APIKeyProfileCurrent(home string, profile []byte, workRoot string) error {
 	current, err := os.ReadFile(filepath.Join(home, "agent-harness.config.toml"))
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(current, profile) {
+	if !ProfileMatches(current, profile, workRoot) {
 		return errors.New("API キー用ホームの権限プロファイルが古いです。agent-harness setup-api-key を再実行してください")
 	}
 	return nil

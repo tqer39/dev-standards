@@ -339,3 +339,143 @@ func TestRevertCanBeRepeatedAfterMainMoves(t *testing.T) {
 		t.Fatal("branch was not updated")
 	}
 }
+
+func TestSandboxEnvKeepsMiseAndUVStateInWorkClone(t *testing.T) {
+	env := sandboxEnv("/work")
+	for _, want := range []string{
+		"MISE_STATE_DIR=/work/.agent-run/cache/mise-state",
+		"MISE_CACHE_DIR=/work/.agent-run/cache/mise",
+		"UV_CACHE_DIR=/work/.agent-run/cache/uv",
+	} {
+		if !slices.Contains(env, want) {
+			t.Errorf("missing %q in %v", want, env)
+		}
+	}
+	// 信頼する範囲を広げない。作業用 clone だけを指定する。
+	if !slices.Contains(env, "MISE_TRUSTED_CONFIG_PATHS=/work") {
+		t.Errorf("trusted paths must be only the work clone: %v", env)
+	}
+}
+
+func TestImplementerAndVerifyShareMiseState(t *testing.T) {
+	runner := &scriptRunner{}
+	tree := &GitTree{Run: runner, Codex: "codex"}
+	if _, _, err := tree.Verify(context.Background(), "/work", []string{"mise", "run", "check"}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(runner.calls[0].Env, "MISE_STATE_DIR=/work/.agent-run/cache/mise-state") {
+		t.Fatalf("verify env=%v", runner.calls[0].Env)
+	}
+	args := (&Herdr{Codex: "codex"}).implementerArgs(&Record{RunID: "r1", Model: "m", Effort: "low"}, "/work", "p", nil)
+	if !slices.Contains(args, "MISE_STATE_DIR=/work/.agent-run/cache/mise-state") {
+		t.Fatalf("implementer args=%v", args)
+	}
+}
+
+func TestPrepareCopiesStandardsRuntimeWithoutExportingIt(t *testing.T) {
+	remote := newRemote(t)
+	tree, rec := newTree(t, remote)
+	source := filepath.Join(tree.WorkRoot, "n", ".standards", "cache", "dev-standards")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := tree.Prepare(context.Background(), rec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(paths.Work, ".standards", "cache", "dev-standards"))
+	if err != nil || info.Mode()&0o100 == 0 {
+		t.Fatalf("runtime was not copied as an executable: info=%v err=%v", info, err)
+	}
+	// 利用先が .standards/cache/ を無視していなくても、差分に含めない。
+	if err := os.WriteFile(filepath.Join(paths.Work, "new.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch, err := tree.Export(context.Background(), paths.Work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(patch), "dev-standards") {
+		t.Fatalf("patch includes the runtime: %s", patch)
+	}
+}
+
+func TestPrepareWithoutStandardsRuntime(t *testing.T) {
+	tree, rec := newTree(t, newRemote(t))
+	paths, err := tree.Prepare(context.Background(), rec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(paths.Work, ".standards")); !os.IsNotExist(err) {
+		t.Fatalf(".standards was created without a runtime: %v", err)
+	}
+}
+
+func TestCopyStandardsRuntimeRefusesSymlink(t *testing.T) {
+	tree, rec := newTree(t, "")
+	source := filepath.Join(tree.WorkRoot, "n", ".standards", "cache", "dev-standards")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(work, ".standards")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.copyStandardsRuntime(rec, work); err == nil {
+		t.Fatal("runtime was written through a symlink")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "cache")); !os.IsNotExist(err) {
+		t.Fatalf("wrote outside the clone: %v", err)
+	}
+}
+
+func TestCopyStandardsRuntimeKeepsExistingTarget(t *testing.T) {
+	tree, rec := newTree(t, "")
+	source := filepath.Join(tree.WorkRoot, "n", ".standards", "cache", "dev-standards")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("runtime"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	cache := filepath.Join(work, ".standards", "cache")
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 実行ファイルの位置が clone の外へのリンクでも、リンク先を書き換えない。
+	outside := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(outside, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(cache, "dev-standards")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.copyStandardsRuntime(rec, work); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(outside); string(data) != "keep" {
+		t.Fatalf("file outside the clone was overwritten: %q", data)
+	}
+}
+
+func TestCopyStandardsRuntimeIgnoresMissingCheckoutDirectory(t *testing.T) {
+	tree, rec := newTree(t, "")
+	// 利用者の checkout の位置がファイルだと ENOTDIR になる。実行ファイルが無いのと同じに扱う。
+	if err := os.MkdirAll(tree.WorkRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tree.WorkRoot, "n"), []byte("file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.copyStandardsRuntime(rec, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -273,3 +273,25 @@ func TestReviewCanReadOwnDirectoryButNotAPIKey(t *testing.T) {
 		t.Fatalf("the API key must stay denied: %s", joined)
 	}
 }
+
+func TestQuotaPatternIgnoresAvailableResetNotice(t *testing.T) {
+	// Codex は上限に達していなくても、残りのリセット回数を常に表示する。
+	for _, screen := range []string{
+		"You have 1 usage limit reset available",
+		"■ The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.\nYou have 1 usage limit reset available",
+	} {
+		if quotaPattern.MatchString(screen) {
+			t.Errorf("%q was treated as quota exhaustion", screen)
+		}
+	}
+	for _, screen := range []string{
+		"■ You've hit your usage limit. Visit settings",
+		"■ You’ve hit your usage limit. Visit https://chatgpt.com/settings/usage",
+		"You've hit your limit · resets 3pm",
+		"Claude usage limit reached",
+	} {
+		if !quotaPattern.MatchString(screen) {
+			t.Errorf("%q was not treated as quota exhaustion", screen)
+		}
+	}
+}

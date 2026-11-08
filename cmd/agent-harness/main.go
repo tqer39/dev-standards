@@ -4,7 +4,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,6 +24,9 @@ import (
 
 // betterleaksTool は mise で起動する版を固定する。agent-telemetry の版と揃える。
 const betterleaksTool = "aqua:betterleaks/betterleaks@1.9.0"
+
+// defaultModel は実装担当の既定のモデルである。使えるかは run と doctor で確認する。
+const defaultModel = "gpt-6.1-sol"
 
 type runProfile struct{ Agent, Model, Effort, Reviewer string }
 
@@ -118,6 +120,9 @@ func setupAPIKey(out io.Writer) error {
 	return nil
 }
 
+// workRoot はハーネスが作業用 clone を作る場所である。
+func workRoot(home string) string { return filepath.Join(home, "workspace", "tqer39") }
+
 func installProfile() error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -126,7 +131,7 @@ func installProfile() error {
 	path := filepath.Join(home, ".codex", "agent-harness.config.toml")
 	existing, err := os.ReadFile(path)
 	if err == nil {
-		if bytes.Equal(existing, harnessassets.CodexProfile) {
+		if harness.ProfileMatches(existing, harnessassets.CodexProfile, workRoot(home)) {
 			return nil
 		}
 		return fmt.Errorf("%s は内容が異なるので上書きしません。新しい版を導入するには、内容を確認してから `mv %s %s.bak` で退避し、`agent-harness setup` を再実行してください", path, path, path)
@@ -226,7 +231,7 @@ func build(repo, codexAuth string) (*harness.Orchestrator, error) {
 		Tokens:     tokens,
 		Codex:      paths["codex"],
 		StateRoot:  root,
-		WorkRoot:   filepath.Join(home, "workspace", "tqer39"),
+		WorkRoot:   workRoot(home),
 		RemoteURL:  func(repo string) string { return "https://github.com/" + repo + ".git" },
 		AuthHeader: true,
 	}
@@ -263,7 +268,7 @@ func runCommand(args []string, out io.Writer) error {
 	acceptancePatch := flags.String("acceptance-patch", "", "固定する受入テストの差分")
 	approved := flags.Bool("approved-by-human", false, "受入条件を人間が承認した")
 	agent := flags.String("agent", "codex", "実装担当")
-	model := flags.String("model", "gpt-6.1-sol", "モデル")
+	model := flags.String("model", defaultModel, "モデル")
 	effort := flags.String("effort", "medium", "エフォート")
 	codexAuth := flags.String("codex-auth", "chatgpt", "Codex の認証: chatgpt, api-key（従量課金）")
 	if err := flags.Parse(args); err != nil {
@@ -303,6 +308,13 @@ func runCommand(args []string, out io.Writer) error {
 			return err
 		}
 	}
+	if err := updateCodex(out); err != nil {
+		return err
+	}
+	// 使えないモデルでは実装担当が起動直後に止まるので、clone を作る前に確認する。
+	if err := checkModel(*codexAuth, selected.Model); err != nil {
+		return err
+	}
 	orchestrator, err := build(*repo, *codexAuth)
 	if err != nil {
 		return err
@@ -317,6 +329,48 @@ func runCommand(args []string, out io.Writer) error {
 	fmt.Fprintf(out, "実行 ID: %s\n", rec.RunID)
 	err = orchestrator.Run(context.Background(), rec, acceptance, *approved)
 	return report(out, rec, err)
+}
+
+// updateCodex は作業の前に Codex CLI を最新の版にする。
+func updateCodex(out io.Writer) error {
+	mise, err := resolve("mise")
+	if err != nil {
+		return err
+	}
+	// OSRunner は環境変数を絞るので、利用者の mise の設定とインストール先を指す値を渡す。
+	var env []string
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "MISE_") {
+			env = append(env, kv)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	from, to, err := harness.UpdateCodex(ctx, harness.OSRunner{}, mise, env)
+	if err != nil {
+		// レジストリに届かなくても、今の CLI でモデルを使えるなら続ける。使えるかは checkModel が判定する。
+		fmt.Fprintf(out, "Codex CLI を更新できないので、今の版で続けます: %v\n", err)
+		return nil
+	}
+	if to != "" {
+		fmt.Fprintf(out, "Codex CLI を %s から %s に更新しました。\n", from, to)
+	}
+	return nil
+}
+
+// checkModel は実行と同じ認証方式と Codex の実体で、モデルを使えるかを確認する。
+func checkModel(auth, model string) error {
+	home, err := codexHomeFor(auth)
+	if err != nil {
+		return err
+	}
+	codex, err := resolve("codex")
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	return harness.ModelAvailable(ctx, harness.OSRunner{}, codex, home, model)
 }
 
 func report(out io.Writer, rec *harness.Record, err error) error {
@@ -408,6 +462,7 @@ func doctor(args []string, out io.Writer) error {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	repo := flags.String("repo", "", "owner/name")
 	codexAuth := flags.String("codex-auth", "chatgpt", "Codex の認証: chatgpt, api-key")
+	model := flags.String("model", defaultModel, "run で使うモデル")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -448,11 +503,20 @@ func doctor(args []string, out io.Writer) error {
 			err = harness.APIKeyLoggedIn(context.Background(), harness.OSRunner{}, codex, codexHome)
 		}
 	}
+	authErr := err
 	if *codexAuth != "chatgpt" {
-		check("Codex の API キー", err)
+		check("Codex の API キー", authErr)
 		if codexHome != "" {
-			check("API キー用ホームの権限プロファイル", harness.APIKeyProfileCurrent(codexHome, harnessassets.CodexProfile))
+			home, homeErr := os.UserHomeDir()
+			if homeErr == nil {
+				homeErr = harness.APIKeyProfileCurrent(codexHome, harnessassets.CodexProfile, workRoot(home))
+			}
+			check("API キー用ホームの権限プロファイル", homeErr)
 		}
+	}
+	// 認証できないと一覧を取れず、原因と違う失敗が並ぶので、認証の失敗だけを示す。
+	if authErr == nil {
+		check("Codex のモデル "+*model, checkModel(*codexAuth, *model))
 	}
 	// 実際のレビューと同じ実体で確認する。
 	claude, err := resolve("claude")

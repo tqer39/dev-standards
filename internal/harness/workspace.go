@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 const maxPatchBytes = 5 << 20
@@ -134,10 +135,54 @@ func (t *GitTree) Prepare(ctx context.Context, rec *Record, acceptance []byte) (
 	if err := os.MkdirAll(filepath.Dir(exclude), 0o755); err != nil {
 		return paths, err
 	}
-	if err := os.WriteFile(exclude, []byte(".agent-run/\n"), 0o644); err != nil {
+	// 共通ルールの実行ファイルは Git 管理外なので、差分に含めないよう除外する。
+	if err := os.WriteFile(exclude, []byte(".agent-run/\n.standards/cache/\n"), 0o644); err != nil {
+		return paths, err
+	}
+	if err := t.copyStandardsRuntime(rec, paths.Work); err != nil {
 		return paths, err
 	}
 	return paths, nil
+}
+
+// copyStandardsRuntime は利用者の checkout にある dev-standards の実行ファイルを作業用 clone に置く。
+// Git 管理外なので clone には無く、mise run check や standards:prepare が失敗する。
+// サンドボックスからは GitHub に接続できないので、作業用 clone の中では取得できない。
+func (t *GitTree) copyStandardsRuntime(rec *Record, work string) error {
+	_, name, _ := strings.Cut(rec.Repo, "/")
+	source := filepath.Join(t.WorkRoot, name, ".standards", "cache", "dev-standards")
+	data, err := os.ReadFile(source)
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		// dev-standards を採用していないリポジトリでは何もしない。
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	// 基準ブランチの内容で .standards がリンクにされていると、clone の外に書き込んでしまう。
+	for _, dir := range []string{".standards", filepath.Join(".standards", "cache")} {
+		info, err := os.Lstat(filepath.Join(work, dir))
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s がシンボリックリンクなので dev-standards を配置しません", dir)
+		}
+	}
+	target := filepath.Join(work, ".standards", "cache", "dev-standards")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	// 既にあるもの（Git 管理のファイルやリンク）は上書きしない。O_EXCL はリンクの先も辿らない。
+	file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = file.Write(data)
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 func (t *GitTree) sandbox(ctx context.Context, dir string, env []string, command ...string) (string, error) {
@@ -150,7 +195,12 @@ func sandboxEnv(dir string) []string {
 	cache := filepath.Join(dir, ".agent-run", "cache")
 	return []string{
 		"MISE_YES=1",
+		// 信頼するのはハーネスが作った作業用 clone だけにする。
 		"MISE_TRUSTED_CONFIG_PATHS=" + dir,
+		// mise は信頼済みの設定でも記録を状態ディレクトリに書く。既定の ~/.local/state/mise には書けず、
+		// 設定を読めずに失敗するので、状態とキャッシュも作業用 clone に置く。
+		"MISE_STATE_DIR=" + filepath.Join(cache, "mise-state"),
+		"MISE_CACHE_DIR=" + filepath.Join(cache, "mise"),
 		"XDG_CACHE_HOME=" + cache,
 		"GOCACHE=" + filepath.Join(cache, "go"),
 		// 既定の ~/go/pkg/mod には書けず、依存を追加できない。チェックサムのキャッシュも GOPATH の下に置かれる。
