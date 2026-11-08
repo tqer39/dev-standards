@@ -116,6 +116,7 @@ CodeRabbit は、シートのない GitHub App が作成した PR をレビュ�
 レビューには、CodeRabbit の Team Management で App の bot にシートを割り当てる必要がある。
 
 外部レビューの完了は既定で待たない。未解決のスレッドは毎回確認し、人間のコメントがあれば止まる。
+CodeRabbit は無料枠の範囲だけで使う。rate limit になっても待機や再依頼はせず、CodeRabbit なしで次に進む。
 
 シートを割り当てたリポジトリでは、`external_review_check` と `external_review_authors` を指定できる。
 ただし、スキップや上限到達でも check は `completed` になり（`skipped` や `neutral`）、ハーネスは結果を区別しない。
