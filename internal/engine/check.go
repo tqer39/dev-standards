@@ -45,6 +45,10 @@ func (t *Tree) Check() (Report, error) {
 		}
 	}
 	for _, rule := range rules {
+		if rule.Checks[0].Type == "review" {
+			r.Results = append(r.Results, Result{rule.ID, rule.Checks[0].ID, component, "review_required", "not evaluated by check; compare the repository with the rule guidance"})
+			continue
+		}
 		r.Results = append(r.Results, Result{rule.ID, "configuration", component, status, evidence})
 	}
 	for _, rule := range []string{"CORE-LINT", "CORE-FORMAT", "CORE-BOOTSTRAP"} {

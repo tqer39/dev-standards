@@ -56,7 +56,8 @@ mise run catalog:check
 保守処理の受け入れテスト `TestFleetUpdatesSourceAndProjectWithoutHumanApproval` は、
 複製したリポジトリで検証一式を再実行するため時間がかかります。
 `-short` の指定時はこのテストだけを省略するため、`mise run test:race` では実行しません。
-CI では Windows の PR に限り `GOFLAGS=-short` で省略し、`main` への push では全 OS で実行します。
+CI では他のテストを `GOFLAGS=-short` で実行し、このテストは別のジョブで並列に実行します。
+このテストは PR では Ubuntu、`main` への push では全 OS で実行します。
 
 ビルドした CLI は `bin/` にあります。
 Windows の実行ファイル名は `dev-standards.exe`、他の OS では `dev-standards` です。
@@ -115,6 +116,11 @@ dev-standards verify
 `verify` は設定を確認したうえで、mise の lint、整形確認、test、build を実行します。
 言語選定の妥当性のレビューと、新規環境での bootstrap は別の証拠が必要なため、
 結果をそれぞれ `review_required`、`not_run` として明示します。
+
+[GitHub Actions の安全対策](guidance/core/actions-security.md)、
+[CI のキャッシュと処理時間](guidance/core/ci-speed.md)、
+[Renovate の更新のまとめ方](guidance/core/renovate-grouping.md)も、
+設定の照合では判定できないため `review_required` と報告します。
 
 ## Python/uv の既存リポジトリへの適用
 

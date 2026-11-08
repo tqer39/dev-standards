@@ -172,12 +172,16 @@ func Catalog() ([]Rule, error) {
 		}
 		checks := map[string]bool{}
 		for _, c := range rule.Checks {
+			wantType := "builtin"
 			switch c.Handler {
 			case "editorconfig", "gitignore", "mise", "bootstrap", "lint", "format", "language":
+			// 生成物の一致では判定できないルール。builtin にすると check が pass と報告してしまう。
+			case "actions-security", "ci-speed", "renovate-grouping":
+				wantType = "review"
 			default:
 				return fmt.Errorf("unknown handler: %s", c.Handler)
 			}
-			if c.Type != "builtin" || len(c.Parameters) != 0 || checks[c.ID] {
+			if c.Type != wantType || len(c.Parameters) != 0 || checks[c.ID] {
 				return fmt.Errorf("invalid check in %s", rule.ID)
 			}
 			checks[c.ID] = true

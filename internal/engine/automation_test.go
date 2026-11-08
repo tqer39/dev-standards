@@ -27,6 +27,12 @@ func TestAutomationAdoptionAndStableHooks(t *testing.T) {
 	if !strings.Contains(read(t, tree.Root, "AGENTS.md"), "既存の指示") {
 		t.Fatal("lost original instructions")
 	}
+	rulesText := read(t, tree.Root, ".standards/rules.md")
+	for _, want := range []string{"## CORE-ACTIONS-SECURITY", "## CORE-CI-SPEED", "## CORE-RENOVATE-GROUPING"} {
+		if !strings.Contains(rulesText, want) {
+			t.Fatalf("rule guidance not distributed: %s", want)
+		}
+	}
 	var taskConfig map[string]struct {
 		Run        string
 		RunWindows string `toml:"run_windows"`

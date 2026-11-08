@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "CORE-ACTIONS-SECURITY",
+  "revision": 1,
+  "status": "active",
+  "title": "GitHub Actions のサプライチェーン攻撃対策を導入する",
+  "rationale": "依存するアクションや PR の内容が改ざんされても、リポジトリの権限と secret に被害が及ばないようにする。",
+  "appliesTo": {
+    "profiles": [
+      "base"
+    ]
+  },
+  "phases": [
+    "adopt",
+    "pr"
+  ],
+  "enforcement": {
+    "level": "error",
+    "waivable": false
+  },
+  "checks": [
+    {
+      "id": "review",
+      "type": "review",
+      "handler": "actions-security",
+      "parameters": {}
+    }
+  ],
+  "remediation": {
+    "mode": "assisted",
+    "handler": "workflow",
+    "instructions": "ワークフローを説明の一覧と照合し、不足する対策を導入する。check はこの内容を判定しないため、成功だけで適合と扱わない。"
+  },
+  "guidance": "guidance/core/actions-security.md",
+  "references": [
+    "https://docs.github.com/en/actions/reference/security/secure-use"
+  ]
+}

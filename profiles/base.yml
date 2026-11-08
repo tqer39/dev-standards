@@ -8,6 +8,9 @@
     "CORE-BOOTSTRAP",
     "CORE-LINT",
     "CORE-FORMAT",
+    "CORE-ACTIONS-SECURITY",
+    "CORE-CI-SPEED",
+    "CORE-RENOVATE-GROUPING",
     "PROCESS-LANGUAGE"
   ],
   "platforms": [

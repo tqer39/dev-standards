@@ -9,6 +9,7 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  # Windows は準備と engine のテストが遅く、短縮後も 3 分半ほどかかる。
   check:
     strategy:
       fail-fast: false
@@ -17,44 +18,42 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
-      # main への push はキャッシュしたテスト結果を使わず、全 OS で全テストを実行する。
-      # Windows の PR は、待ち時間を決めている複製先での再検証テストだけを省略する。
-      GOFLAGS: ${{ github.event_name != 'pull_request' && '-count=1' || matrix.os == 'windows-latest' && '-short' || '' }}
+      # 複製先で検証一式を再実行する受け入れテストは acceptance ジョブで並列に実行する。
+      # main への push はキャッシュしたテスト結果を使わない。
+      GOFLAGS: ${{ github.event_name != 'pull_request' && '-short -count=1' || '-short' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
         with:
-          version: 2026.10.20
-      - id: go-env
-        shell: bash
-        run: |
-          {
-            echo "gocache=$(mise exec -- go env GOCACHE)"
-            echo "gomodcache=$(mise exec -- go env GOMODCACHE)"
-            echo "goversion=$(mise exec -- go env GOVERSION)"
-          } >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ${{ steps.go-env.outputs.gocache }}
-            ${{ steps.go-env.outputs.gomodcache }}
-          key: go-${{ runner.os }}-${{ steps.go-env.outputs.goversion }}-${{ hashFiles('go.sum') }}
-      # 同じキーでは保存し直さないので、5 日を超えた内容が Go の自動削除で失われないようにする。
-      - shell: bash
-        env:
-          GOCACHE_DIR: ${{ steps.go-env.outputs.gocache }}
-        run: |
-          mkdir -p "$GOCACHE_DIR"
-          date +%s > "$GOCACHE_DIR/trim.txt"
+          persist-credentials: false
+      - uses: ./.github/actions/setup
       - run: mise run check
       - if: runner.os != 'Windows'
         run: mise run test:race
+  acceptance:
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS と Windows ではこのテストだけで 4 分前後かかるため、PR では Ubuntu で確認し、
+        # main への push で全 OS を確認する。
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest", "windows-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      GOFLAGS: ${{ github.event_name != 'pull_request' && '-count=1' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - shell: bash
+        run: mise exec -- go test -timeout=20m -run '^TestFleetUpdatesSourceAndProjectWithoutHumanApproval$' ./internal/automation
   workflow-result:
     if: always()
-    needs: [check]
+    needs: [check, acceptance]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - env:
-          RESULT: ${{ needs.check.result }}
-        run: test "$RESULT" = success
+          CHECK: ${{ needs.check.result }}
+          ACCEPTANCE: ${{ needs.acceptance.result }}
+        run: test "$CHECK" = success && test "$ACCEPTANCE" = success
