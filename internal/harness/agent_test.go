@@ -220,8 +220,24 @@ func TestStartImplementerUsesDedicatedCodexHome(t *testing.T) {
 		t.Fatalf("mcp list env=%v", runner.calls[0].Env)
 	}
 	joined := strings.Join(runner.calls[1].Args, " ")
-	if !strings.Contains(joined, "-- /usr/bin/env CODEX_HOME=/state/codex-api-home /abs/codex -p agent-harness") {
+	if !strings.Contains(joined, " CODEX_HOME=/state/codex-api-home /abs/codex -p agent-harness") {
 		t.Fatalf("args=%s", joined)
+	}
+}
+
+func TestStartImplementerGetsVerifyEnvironment(t *testing.T) {
+	// 実装担当のコマンドも同じ権限で動く。HOME の下に書けないので、依存の取得先を作業用 clone に向ける。
+	runner := &scriptRunner{responses: map[string]response{"/abs/codex -p": {out: `[]`}}}
+	if err := herdrFor(runner).StartImplementer(context.Background(), &Record{RunID: "r1"}, "/work", "task"); err != nil {
+		t.Fatal(err)
+	}
+	// hc は引数ごとに渡すので、結合した文字列ではなく要素の境界も比較する。
+	args := runner.calls[1].Args
+	start := slices.Index(args, "--")
+	want := append([]string{"--", "/usr/bin/env"}, sandboxEnv("/work")...)
+	want = append(want, "/abs/codex")
+	if start < 0 || len(args)-start < len(want) || !slices.Equal(args[start:start+len(want)], want) {
+		t.Fatalf("args=%q", args)
 	}
 }
 

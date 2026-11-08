@@ -179,7 +179,7 @@ GitHub App の条件は次のとおりとする。
 
 サンドボックスの権限プロファイルで次を強制する。
 
-- 書き込みは worktree の内部だけとする。
+- 書き込みは worktree の内部だけとする。実装担当と検証のコマンドには、Go、uv、npm のキャッシュと Go のモジュールの保存先を worktree の `.agent-run/cache` に向ける環境変数を渡す。Go は既存のモジュールキャッシュを読み取り専用の proxy として先に使う。
 - 通信はパッケージレジストリと公式ドキュメントだけを許可する。GitHub には接続させない。
 - `~/.config/gh`、`~/.ssh`、`~/.codex/config.toml`、キーチェーンの読み取りを拒否する。
 - パッケージや外部サービスのトークンを持つ `~/.npmrc`、`~/.netrc`、`~/.git-credentials`、`~/.pypirc`、`~/.docker`、`~/.kube`、`~/.gnupg`、`~/.config/gcloud` と、Codex の他のセッションの記録も拒否する。
