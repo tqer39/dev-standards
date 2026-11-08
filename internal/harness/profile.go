@@ -11,9 +11,9 @@ import (
 
 var (
 	// harnessProject はハーネスが作った作業用 clone の projects 節である。
-	projectHeader  = regexp.MustCompile(`^\[projects\.(?:"([^"]*)"|'([^']*)')\]$`)
-	harnessClone   = regexp.MustCompile(`-worktrees/agent-\d{8}-\d{6}-[0-9a-f]{4}$`)
-	trustedLine    = regexp.MustCompile(`^trust_level\s*=\s*"trusted"$`)
+	projectHeader = regexp.MustCompile(`^\[projects\.(?:"([^"]*)"|'([^']*)')\]$`)
+	harnessClone  = regexp.MustCompile(`-worktrees/agent-\d{8}-\d{6}-[0-9a-f]{4}$`)
+	trustedLine   = regexp.MustCompile(`^trust_level\s*=\s*"trusted"$`)
 )
 
 // ProfileMatches は権限プロファイルが埋め込みの版と同じかを返す。
