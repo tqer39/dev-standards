@@ -78,10 +78,12 @@ func (h *Herdr) enabledMCP(ctx context.Context) ([]string, error) {
 }
 
 func (h *Herdr) implementerArgs(rec *Record, work, prompt string, disabledMCP []string) []string {
-	args := []string{"run", "--bg", "--json", "--name", implName(rec), "--cwd", work, "--no-parent", "--"}
+	// hc の端末は呼び出し元の環境を引き継がない。実装担当のコマンドにも検証と同じ書き込み先を渡す。
+	// 値はパスと設定だけで秘密情報ではない。
+	args := []string{"run", "--bg", "--json", "--name", implName(rec), "--cwd", work, "--no-parent", "--", "/usr/bin/env"}
+	args = append(args, sandboxEnv(work)...)
 	if h.CodexHome != "" {
-		// hc の端末は呼び出し元の環境を引き継がない。値はパスだけで秘密情報ではない。
-		args = append(args, "/usr/bin/env", "CODEX_HOME="+h.CodexHome)
+		args = append(args, "CODEX_HOME="+h.CodexHome)
 	}
 	args = append(args,
 		h.Codex, "-p", "agent-harness", "-m", rec.Model,

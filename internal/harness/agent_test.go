@@ -220,7 +220,19 @@ func TestStartImplementerUsesDedicatedCodexHome(t *testing.T) {
 		t.Fatalf("mcp list env=%v", runner.calls[0].Env)
 	}
 	joined := strings.Join(runner.calls[1].Args, " ")
-	if !strings.Contains(joined, "-- /usr/bin/env CODEX_HOME=/state/codex-api-home /abs/codex -p agent-harness") {
+	if !strings.Contains(joined, " CODEX_HOME=/state/codex-api-home /abs/codex -p agent-harness") {
+		t.Fatalf("args=%s", joined)
+	}
+}
+
+func TestStartImplementerGetsVerifyEnvironment(t *testing.T) {
+	// 実装担当のコマンドも同じ権限で動く。HOME の下に書けないので、依存の取得先を作業用 clone に向ける。
+	runner := &scriptRunner{responses: map[string]response{"/abs/codex -p": {out: `[]`}}}
+	if err := herdrFor(runner).StartImplementer(context.Background(), &Record{RunID: "r1"}, "/work", "task"); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(runner.calls[1].Args, " ")
+	if !strings.Contains(joined, "-- /usr/bin/env "+strings.Join(sandboxEnv("/work"), " ")+" /abs/codex") {
 		t.Fatalf("args=%s", joined)
 	}
 }

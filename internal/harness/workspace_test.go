@@ -166,6 +166,20 @@ func TestExportIgnoresGitHooksFromWorkClone(t *testing.T) {
 	}
 }
 
+func TestSandboxEnvKeepsGoModulesInWorkClone(t *testing.T) {
+	t.Setenv("HOME", "/home/u")
+	env := strings.Join(sandboxEnv("/work"), "\n")
+	for _, want := range []string{
+		"GOPATH=/work/.agent-run/cache/gopath",
+		"GOFLAGS=-modcacherw",
+		"GOPROXY=file:///home/u/go/pkg/mod/cache/download,https://proxy.golang.org",
+	} {
+		if !strings.Contains(env, want) {
+			t.Errorf("missing %q in\n%s", want, env)
+		}
+	}
+}
+
 // outputSize は受け取った出力の最大長を記録する。
 type outputSize struct {
 	inner   Runner

@@ -145,6 +145,7 @@ func (t *GitTree) sandbox(ctx context.Context, dir string, env []string, command
 	return t.Run.Run(ctx, Cmd{Name: t.Codex, Args: args, Env: env})
 }
 
+// sandboxEnv はサンドボックス内のコマンドの書き込み先を作業用 clone に向ける。HOME の下には書けない。
 func sandboxEnv(dir string) []string {
 	cache := filepath.Join(dir, ".agent-run", "cache")
 	return []string{
@@ -152,9 +153,24 @@ func sandboxEnv(dir string) []string {
 		"MISE_TRUSTED_CONFIG_PATHS=" + dir,
 		"XDG_CACHE_HOME=" + cache,
 		"GOCACHE=" + filepath.Join(cache, "go"),
+		// 既定の ~/go/pkg/mod には書けず、依存を追加できない。チェックサムのキャッシュも GOPATH の下に置かれる。
+		"GOPATH=" + filepath.Join(cache, "gopath"),
+		// 読み取り専用で作られると、作業用 clone を削除できない。
+		"GOFLAGS=-modcacherw",
+		"GOPROXY=" + goProxy(),
 		"UV_CACHE_DIR=" + filepath.Join(cache, "uv"),
 		"npm_config_cache=" + filepath.Join(cache, "npm"),
 	}
+}
+
+// goProxy は既存のモジュールキャッシュを読み取り専用で先に使う。無いものは許可済みの proxy.golang.org から取る。
+func goProxy() string {
+	const proxy = "https://proxy.golang.org"
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return proxy
+	}
+	return "file://" + filepath.Join(home, "go", "pkg", "mod", "cache", "download") + "," + proxy
 }
 
 // Verify はリポジトリの検証をサンドボックス内で実行する。
