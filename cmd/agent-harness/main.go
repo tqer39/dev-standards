@@ -120,6 +120,9 @@ func setupAPIKey(out io.Writer) error {
 	return nil
 }
 
+// workRoot はハーネスが作業用 clone を作る場所である。
+func workRoot(home string) string { return filepath.Join(home, "workspace", "tqer39") }
+
 func installProfile() error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -128,7 +131,7 @@ func installProfile() error {
 	path := filepath.Join(home, ".codex", "agent-harness.config.toml")
 	existing, err := os.ReadFile(path)
 	if err == nil {
-		if harness.ProfileMatches(existing, harnessassets.CodexProfile) {
+		if harness.ProfileMatches(existing, harnessassets.CodexProfile, workRoot(home)) {
 			return nil
 		}
 		return fmt.Errorf("%s は内容が異なるので上書きしません。新しい版を導入するには、内容を確認してから `mv %s %s.bak` で退避し、`agent-harness setup` を再実行してください", path, path, path)
@@ -228,7 +231,7 @@ func build(repo, codexAuth string) (*harness.Orchestrator, error) {
 		Tokens:     tokens,
 		Codex:      paths["codex"],
 		StateRoot:  root,
-		WorkRoot:   filepath.Join(home, "workspace", "tqer39"),
+		WorkRoot:   workRoot(home),
 		RemoteURL:  func(repo string) string { return "https://github.com/" + repo + ".git" },
 		AuthHeader: true,
 	}
@@ -470,13 +473,21 @@ func doctor(args []string, out io.Writer) error {
 			err = harness.APIKeyLoggedIn(context.Background(), harness.OSRunner{}, codex, codexHome)
 		}
 	}
+	authErr := err
 	if *codexAuth != "chatgpt" {
-		check("Codex の API キー", err)
+		check("Codex の API キー", authErr)
 		if codexHome != "" {
-			check("API キー用ホームの権限プロファイル", harness.APIKeyProfileCurrent(codexHome, harnessassets.CodexProfile))
+			home, homeErr := os.UserHomeDir()
+			if homeErr == nil {
+				homeErr = harness.APIKeyProfileCurrent(codexHome, harnessassets.CodexProfile, workRoot(home))
+			}
+			check("API キー用ホームの権限プロファイル", homeErr)
 		}
 	}
-	check("Codex のモデル "+*model, checkModel(*codexAuth, *model))
+	// 認証できないと一覧を取れず、原因と違う失敗が並ぶので、認証の失敗だけを示す。
+	if authErr == nil {
+		check("Codex のモデル "+*model, checkModel(*codexAuth, *model))
+	}
 	// 実際のレビューと同じ実体で確認する。
 	claude, err := resolve("claude")
 	if err == nil {

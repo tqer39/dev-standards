@@ -435,3 +435,47 @@ func TestCopyStandardsRuntimeRefusesSymlink(t *testing.T) {
 		t.Fatalf("wrote outside the clone: %v", err)
 	}
 }
+
+func TestCopyStandardsRuntimeKeepsExistingTarget(t *testing.T) {
+	tree, rec := newTree(t, "")
+	source := filepath.Join(tree.WorkRoot, "n", ".standards", "cache", "dev-standards")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("runtime"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	cache := filepath.Join(work, ".standards", "cache")
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 実行ファイルの位置が clone の外へのリンクでも、リンク先を書き換えない。
+	outside := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(outside, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(cache, "dev-standards")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.copyStandardsRuntime(rec, work); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(outside); string(data) != "keep" {
+		t.Fatalf("file outside the clone was overwritten: %q", data)
+	}
+}
+
+func TestCopyStandardsRuntimeIgnoresMissingCheckoutDirectory(t *testing.T) {
+	tree, rec := newTree(t, "")
+	// 利用者の checkout の位置がファイルだと ENOTDIR になる。実行ファイルが無いのと同じに扱う。
+	if err := os.MkdirAll(tree.WorkRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tree.WorkRoot, "n"), []byte("file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.copyStandardsRuntime(rec, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+}

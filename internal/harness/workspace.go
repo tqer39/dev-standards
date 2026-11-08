@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 const maxPatchBytes = 5 << 20
@@ -151,7 +152,7 @@ func (t *GitTree) copyStandardsRuntime(rec *Record, work string) error {
 	_, name, _ := strings.Cut(rec.Repo, "/")
 	source := filepath.Join(t.WorkRoot, name, ".standards", "cache", "dev-standards")
 	data, err := os.ReadFile(source)
-	if errors.Is(err, os.ErrNotExist) {
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		// dev-standards を採用していないリポジトリでは何もしない。
 		return nil
 	}
@@ -169,7 +170,19 @@ func (t *GitTree) copyStandardsRuntime(rec *Record, work string) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(target, data, 0o755)
+	// 既にあるもの（Git 管理のファイルやリンク）は上書きしない。O_EXCL はリンクの先も辿らない。
+	file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = file.Write(data)
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 func (t *GitTree) sandbox(ctx context.Context, dir string, env []string, command ...string) (string, error) {

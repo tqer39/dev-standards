@@ -77,10 +77,10 @@ func TestAPIKeyProfileCurrent(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "agent-harness.config.toml"), []byte("old\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := APIKeyProfileCurrent(home, []byte("new\n")); err == nil || !strings.Contains(err.Error(), "setup-api-key") {
+	if err := APIKeyProfileCurrent(home, []byte("new\n"), "/w"); err == nil || !strings.Contains(err.Error(), "setup-api-key") {
 		t.Fatalf("err=%v", err)
 	}
-	if err := APIKeyProfileCurrent(home, []byte("old\n")); err != nil {
+	if err := APIKeyProfileCurrent(home, []byte("old\n"), "/w"); err != nil {
 		t.Fatal(err)
 	}
 }
