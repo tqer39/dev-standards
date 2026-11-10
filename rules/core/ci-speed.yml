@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "CORE-CI-SPEED",
-  "revision": 1,
+  "revision": 2,
   "status": "active",
   "title": "CI をキャッシュで短縮し、3分以上かかる処理を見直す",
   "rationale": "CI の待ち時間が開発と依存更新の流れを止めないようにする。",
