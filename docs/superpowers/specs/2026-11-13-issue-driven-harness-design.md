@@ -2,6 +2,7 @@
 
 [2026-11-07 のハーネス設計](2026-11-07-claude-codex-harness-design.md) を改める。
 依頼の起点を GitHub Issue にし、実装担当の実行方式を Herdr から Orca の端末と `codex exec` に替える。
+あわせて、ハーネスを `dev-standards` から新しいリポジトリ `tqer39/agent-harness` に分離する。
 この文書に書いていない事項（自動マージの条件、秘密情報の段階、実装担当とレビュー担当の分離、復旧、利用枠、評価）は、元の設計のまま変えない。
 
 ## 背景
@@ -70,8 +71,25 @@ agent-harness run（Orca の端末）
 | Orca | 作業中の画面。実装とレビューのログを Mac とスマートフォンで見る |
 | Discord | 呼び出し。人間の判断待ち、完了、異常を PC とスマートフォンに届ける |
 | `agent-telemetry` | 改善。Claude と Codex の OpenTelemetry と会話の記録を集める |
-| `dev-standards` | ハーネス本体、Claude の skill、Codex の権限プロファイル、共通ルール |
+| `agent-harness` | ハーネス本体、Claude の skill と権限ルール、Codex の権限プロファイル |
+| `dev-standards` | リポジトリに適用する共通ルール |
 | `terraform-github` | 全リポジトリのラベル |
+
+## リポジトリの分離
+
+`dev-standards` の役割は、リポジトリへのルールの適用と、その保守である。
+ハーネスは役割が異なるので、`tqer39/agent-harness` に分離する。
+
+- ハーネスのコードは、`dev-standards` の他のコードに依存せず、他のコードからも使われていない。
+- `dev-standards` の CLI は macOS、Linux、Windows を対象にする。ハーネスは Mac Studio の常駐サービスになる。
+- ハーネスの変更で、利用先に配る共通ルールの版を上げずに済む。
+- 自律保守が更新する `dev-standards` と、ハーネス本体の変更を分けられる。
+
+Claude の skill と権限ルールは、リポジトリ単位ではなくユーザー単位（`~/.claude`）の設定である。
+Codex の権限プロファイルと同じく、`agent-harness setup` で配置する。
+
+分離では動作を変えずにコードを移し、この設計の変更は分離後の `agent-harness` で行う。
+Git の履歴は移さず、移行元の `dev-standards` のコミットを記録する。
 
 ## 役割と権限の変更
 
@@ -181,18 +199,14 @@ Herdr の代わりに `codex exec` を使う。
 2026-11-13 の検証で、次の構成が権限プロファイルの制限を保つことを確かめた。
 
 ```sh
-/usr/bin/env -i HOME=… USER=… LANG=… TERM=… PATH=… OTEL_RESOURCE_ATTRIBUTES=… \
-  codex -p agent-harness exec --json -m <model> -c model_reasoning_effort="<effort>" \
+codex -p agent-harness exec --json -m <model> -c model_reasoning_effort="<effort>" \
   -c 'projects."<作業用 clone>".trust_level="trusted"' \
-  --output-schema <結果のスキーマ> -o <result.json> "<指示>" \
-  | tee <events.jsonl> | agent-harness render
+  --output-schema <結果のスキーマ> -o <作業用 clone>/.agent-run/result.json "<指示>"
 ```
 
-- `env -i` で環境変数を絞る。Orca の端末が設定する `ORCA_*`（起動トークンを含む）を実装担当に渡さない。
-- 結果は `--output-schema` で形を固定し、`-o` でファイルに書く。`.agent-run/result.json` を待つ仕組みは廃止する。
-- イベントの JSONL は実行記録と同じ場所に保存する。
-- `agent-harness render` は JSONL を 1 行ずつの表示に変える。コマンド、終了コード、変更したファイル、エージェントのメッセージ、エラーを表示する。パスは作業用 clone からの相対パスで表示する。
-- パイプラインは `pipefail` で実行し、Codex の終了コードを失わない。
+- ハーネスが子プロセスとして起動し、環境変数は固定した一覧と明示した値だけを渡す（`env -i` と同じ効果）。Orca の端末が設定する `ORCA_*`（起動トークンを含む）を実装担当に渡さない。
+- 結果は `--output-schema` で形を固定し、`-o` で従来と同じ `.agent-run/result.json` に書く。画面を読んで完了を待つ仕組みは廃止する。
+- ハーネスは標準出力の JSONL を読み、`events.jsonl` に保存しながら 1 行ずつの表示に変えて、自分の標準出力に流す。コマンド、終了コード、変更したファイル、エージェントのメッセージ、エラーを表示する。パスは作業用 clone からの相対パスで表示する。
 - 修正の依頼と人間の追加指示は `codex exec resume <thread_id>` で同じ thread に送る。thread_id は実行記録に保存する。
 - 完了は、プロセスの終了と結果ファイルの検証で判定する。画面の文字列は読まない。
 - 利用上限とエラーは、`turn.failed` と `error` のイベントで判定する。形式が未確認のものは、エラーの本文を付けて `needs-human` にする。
@@ -275,20 +289,21 @@ Orca のスマートフォンへの通知は使わない。
 
 ## 移行
 
-`dev-standards` で行う変更は次のとおりである。
+最初に、動作を変えずにハーネスを `agent-harness` へ分離する。
+その後、`agent-harness` で次の変更を行う。
 
-1. `Herdr` を、Orca の端末と `codex exec` による実行に置き換え、`render` を追加する。
+1. `Herdr` を `codex exec` による実行に置き換え、イベントの表示を追加する。
 2. `run --issue` を追加し、承認の確認、ラベル、コメント、残タスクの起票を実装する。`--approved-by-human` は廃止する。
 3. `watch` と launchd の設定ファイル、登録と解除の手順を追加する。
 4. Discord の通知を追加する。
 5. 権限プロファイルに OpenTelemetry の設定を加え、属性を渡す。
-6. `~/.claude/skills/agent-harness/SKILL.md` を `dev-standards` に移す。役割を「Issue の作成と受入条件の記述、人間への承認の依頼」に変え、ハーネスの同期実行をやめる。
-7. Claude の権限ルールに、`approved` の付与の拒否を追加する。
-8. `docs/agent-harness.md` と構成図（`.infra`）を更新する。
+6. `~/.claude/skills/agent-harness/SKILL.md` を `agent-harness` に移し、`setup` で配置する。役割を「Issue の作成と受入条件の記述、人間への承認の依頼」に変え、ハーネスの同期実行をやめる。
+7. Claude の権限ルールに `approved` の付与の拒否を追加し、`setup` で配置する。
+8. 運用文書と構成図（`.infra`）を更新する。
 
-`dev-standards` の外で行う作業は次のとおりである。
+`agent-harness` の外で行う作業は次のとおりである。
 
-- `terraform-github` で 3 つのラベルを全リポジトリに追加する。別の PR とし、マージは人間が判断する。
+- `terraform-github` で `agent-harness` リポジトリを管理対象にし、3 つのラベルを全リポジトリに追加する。別の PR とし、マージは人間が判断する。
 - GitHub App に `issues` の書き込み権限を追加する。人間が行う。
 - GitHub Projects を作る。人間が行う。
 - Discord に通知用のチャンネルと webhook を作り、URL を Vault に保存する。人間が行う。
