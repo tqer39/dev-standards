@@ -285,7 +285,7 @@ jobs:
               assert expected['exists'] and target.read_bytes() == expected['content'].encode(), name
           PYTHON
       - name: Check canonical sources with pinned CLI
-        run: mise exec go@1.27.3 -- go run github.com/tqer39/dev-standards/cmd/dev-standards@vSTANDARDS_VERSION check --repo .
+        run: mise exec go@1.27.4 -- go run github.com/tqer39/dev-standards/cmd/dev-standards@vSTANDARDS_VERSION check --repo .
       - run: mise run lint
       - run: gofmt -l . > /tmp/formatting && test ! -s /tmp/formatting
       - run: mise run test
