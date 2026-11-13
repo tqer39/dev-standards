@@ -27,7 +27,7 @@ run = "go test -timeout=20m ./..."
 run = "go test -race -short ./..."
 
 [tasks.build]
-run = "go build -o bin/ ./cmd/dev-standards ./cmd/agent-harness"
+run = "go build -o bin/ ./cmd/dev-standards"
 
 [tasks.check]
 depends = ["lint", "format:check", "test", "build"]
