@@ -3,7 +3,7 @@
 npm.package_manager = "npm"
 
 [tools]
-go = "1.27.3"
+go = "1.27.4"
 node = "24.21.0"
 "npm:markdownlint-cli2" = "0.23.3"
 
