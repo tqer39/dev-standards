@@ -443,7 +443,16 @@ git diff --stat "$SRC_SHA" HEAD -- cmd/agent-harness internal/harness harness sc
 ```
 
 Expected: SHA が 1 行表示され、差分は出ない。
-差分が出たら削除を止め、その差分を `agent-harness` に PR で反映してから、Step 1 からやり直す。
+差分が出たら削除を止め、その差分を `agent-harness` に PR で反映する。
+同じ PR で、README の移行元の SHA を、反映に使った `dev-standards` の `main` の SHA に更新する。更新しないと、次の比較でも同じ差分が出る。
+PR のマージ後、既存の worktree とブランチを消してから、Step 1 からやり直す。
+`git worktree remove` が未コミットの変更で止まったら、その変更を確かめてから消す。
+
+```bash
+cd ~/workspace/tqer39/dev-standards
+git worktree remove .claude/worktrees/remove-agent-harness
+git branch -D chore/remove-agent-harness
+```
 
 - [ ] **Step 3: ファイルを削除する**
 
