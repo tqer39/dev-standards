@@ -11,7 +11,7 @@
 
 **Tech Stack:** Go 1.27.3（外部依存なし）、mise、GitHub CLI、Terraform（`terraform-github`）、`dev-standards` CLI
 
-**仕様:** [設計仕様書](../specs/2026-11-13-issue-driven-harness-design.md) の「リポジトリの分離」
+**仕様:** [設計仕様書](https://github.com/tqer39/agent-harness/blob/main/docs/superpowers/specs/2026-11-13-issue-driven-harness-design.md) の「リポジトリの分離」。Task 2 で移すまでは、`dev-standards` の `docs/superpowers/specs/2026-11-13-issue-driven-harness-design.md` にある。
 
 ---
 
@@ -375,6 +375,14 @@ Expected: PR の plan に、`agent-harness` の import と設定の変更だけ�
 
 - Modify: `~/.claude/skills/agent-harness/SKILL.md`（ハーネスの実行ファイルのパス）
 
+前提: Task 3 の PR がマージ済みである。`mise.toml` は Task 3 で作るので、マージ前の `main` では `mise run build` が失敗する。
+
+```bash
+gh pr list --repo tqer39/agent-harness --head chore/onboard-dev-standards --state merged --json number --jq length
+```
+
+Expected: `1`。`0` ならマージを待つ。
+
 - [ ] **Step 1: 新しいリポジトリでビルドする**
 
 ```bash
@@ -418,7 +426,26 @@ git worktree add .claude/worktrees/remove-agent-harness -b chore/remove-agent-ha
 cd .claude/worktrees/remove-agent-harness
 ```
 
-- [ ] **Step 2: ファイルを削除する**
+- [ ] **Step 2: 移した後の変更がないことを確かめる**
+
+Task 2 の後に、ハーネスの変更が `dev-standards` の `main` にマージされていれば、削除で失われる。
+移行元の SHA は Task 2 で `agent-harness` の README に記録したものを使う。
+
+```bash
+SRC_SHA=$(grep -oE 'dev-standards/tree/[0-9a-f]{40}' ~/workspace/tqer39/agent-harness/README.md | cut -d/ -f3)
+echo "$SRC_SHA"
+git diff --stat "$SRC_SHA" HEAD -- cmd/agent-harness internal/harness harness scripts/agent-harness-probe.sh \
+  docs/agent-harness.md \
+  docs/superpowers/specs/2026-11-07-claude-codex-harness-design.md \
+  docs/superpowers/specs/2026-11-07-claude-codex-harness.infra \
+  docs/superpowers/specs/2026-11-13-issue-driven-harness-design.md \
+  docs/superpowers/plans/2026-11-07-claude-codex-harness.md
+```
+
+Expected: SHA が 1 行表示され、差分は出ない。
+差分が出たら削除を止め、その差分を `agent-harness` に PR で反映してから、Step 1 からやり直す。
+
+- [ ] **Step 3: ファイルを削除する**
 
 ```bash
 git rm -r -q cmd/agent-harness internal/harness harness scripts/agent-harness-probe.sh \
@@ -429,7 +456,7 @@ git rm -r -q cmd/agent-harness internal/harness harness scripts/agent-harness-pr
   docs/superpowers/plans/2026-11-07-claude-codex-harness.md
 ```
 
-- [ ] **Step 3: build タスクから外す**
+- [ ] **Step 4: build タスクから外す**
 
 `mise.toml` の build タスクを次のとおりにする。
 
@@ -438,7 +465,7 @@ git rm -r -q cmd/agent-harness internal/harness harness scripts/agent-harness-pr
 run = "go build -o bin/ ./cmd/dev-standards"
 ```
 
-- [ ] **Step 4: README の案内を差し替える**
+- [ ] **Step 5: README の案内を差し替える**
 
 `README.md` の次の行を置き換える。
 
@@ -454,7 +481,7 @@ Claude と Codex で実装からマージまでを進める手順は [agent-harn
 Claude と Codex で実装からマージまでを進めるハーネスは [tqer39/agent-harness](https://github.com/tqer39/agent-harness) に分離しました。
 ```
 
-- [ ] **Step 5: 残った参照がないことを確認する**
+- [ ] **Step 6: 残った参照がないことを確認する**
 
 ```bash
 git grep -n -iE "agent-harness|internal/harness|harnessassets" -- ':!docs/superpowers/plans/2026-11-13-agent-harness-split.md'
@@ -462,7 +489,7 @@ git grep -n -iE "agent-harness|internal/harness|harnessassets" -- ':!docs/superp
 
 Expected: README の新しい案内の行だけが出る。
 
-- [ ] **Step 6: 検証する**
+- [ ] **Step 7: 検証する**
 
 ```bash
 go mod tidy
@@ -474,7 +501,7 @@ git diff --check
 
 Expected: `go.mod` と `go.sum` は変わらない（ハーネスは外部依存を持たない）。検証はすべて成功する。
 
-- [ ] **Step 7: コミットして PR を作る**
+- [ ] **Step 8: コミットして PR を作る**
 
 ```bash
 git add -A
@@ -486,7 +513,7 @@ gh pr create --repo tqer39/dev-standards --title "chore: agent-harness を tqer3
 
 Expected: PR の CI（`workflow-result`）が成功する。マージは人間が判断する。
 
-- [ ] **Step 8: 調査の Issue に移動先を書く**
+- [ ] **Step 9: 調査の Issue に移動先を書く**
 
 ```bash
 gh issue comment 35 --repo tqer39/dev-standards \
