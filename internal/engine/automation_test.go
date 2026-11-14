@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -12,6 +13,21 @@ import (
 	"github.com/BurntSushi/toml"
 	bundle "github.com/tqer39/dev-standards"
 )
+
+func TestGeneratedActionsFollowSharedSecurityGuidance(t *testing.T) {
+	// Both distributed workflows must satisfy CORE-ACTIONS-SECURITY,
+	// including the version comment required alongside each full SHA.
+	pinned := regexp.MustCompile(`^\s*- uses: [^@]+@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+\s*$`)
+	for name, workflow := range map[string]string{"standards": projectWorkflow, "version-lag": versionLagWorkflow} {
+		t.Run(name, func(t *testing.T) {
+			for _, line := range strings.Split(workflow, "\n") {
+				if strings.Contains(line, "uses:") && !pinned.MatchString(line) {
+					t.Errorf("action does not follow shared guidance: %s", line)
+				}
+			}
+		})
+	}
+}
 
 func TestAutomationAdoptionAndStableHooks(t *testing.T) {
 	tree := fixture(t)
