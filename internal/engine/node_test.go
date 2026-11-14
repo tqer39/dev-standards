@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 const nodePackage = `{"name":"sample","private":true,"scripts":{"lint":"oxlint .","format":"oxfmt --write .","format:check":"oxfmt --check .","test":"node --test","build":"tsc"}}`
@@ -260,5 +262,17 @@ func TestNodeWorkflowRetainsBootstrapExtensions(t *testing.T) {
 	workflow := read(t, tree.Root, ".github/workflows/dev-standards.yml")
 	if !strings.Contains(workflow, "npm ci --ignore-scripts --prefix .\n      - run: mise run project:bootstrap\n      - run: mise run lint") {
 		t.Fatal("bootstrap extension missing from CI")
+	}
+	var tasks struct {
+		Bootstrap struct {
+			Run     []string
+			Depends []string
+		}
+	}
+	if _, err := toml.Decode(read(t, tree.Root, ".standards/tasks.standards.toml"), &tasks); err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks.Bootstrap.Depends) != 0 || len(tasks.Bootstrap.Run) != 2 || tasks.Bootstrap.Run[0] != "npm --prefix . ci --ignore-scripts" || tasks.Bootstrap.Run[1] != "mise run project:bootstrap" {
+		t.Fatal("local bootstrap must finish dependency installation before running its extension")
 	}
 }

@@ -108,6 +108,11 @@ run = "dev-standards verify"
 		if _, ok := extensions[extension]; !ok {
 			continue
 		}
+		if c.Profile == "node-npm" && task == "bootstrap" {
+			install := "npm --prefix " + c.Path + " ci --ignore-scripts"
+			base = strings.Replace(base, fmt.Sprintf("run = %q", install), fmt.Sprintf("run = [%q, %q]", install, "mise run "+extension), 1)
+			continue
+		}
 		header := "[" + task + "]\n"
 		if strings.Contains(task, ":") {
 			header = "[\"" + task + "\"]\n"
