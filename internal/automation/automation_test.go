@@ -664,9 +664,9 @@ func TestProjectInstructionOwnership(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, name := range []string{"AGENTS.md", ".rulesync/rules/dev-standards.md"} {
+			for _, name := range []string{"AGENTS.md", ".rulesync/rules/dev-standards.md", ".claude/rules/dev-standards-agent-harness.md", ".claude/rules/dev-standards.md", ".claude/rules/personal.md"} {
 				put(t, dir, name, "candidate instruction\n")
-				want := (mode == "rulesync") == (name != "AGENTS.md")
+				want := name == ".claude/rules/dev-standards-agent-harness.md" || (name == "AGENTS.md" && mode == "") || (name == ".rulesync/rules/dev-standards.md" && mode == "rulesync")
 				if err := guardProject(dir, []string{name}, Default(Entry{}), cfg); (err == nil) != want {
 					t.Fatalf("%s allowed=%v: %v", name, want, err)
 				}
@@ -688,6 +688,11 @@ func TestProjectInstructionOwnership(t *testing.T) {
 			put(t, dir, ".standards/state.json", string(engine.JSON(owned)))
 			if err := guardProject(dir, []string{name}, Default(Entry{}), cfg); err == nil {
 				t.Fatal("unowned instructions accepted")
+			}
+			delete(owned.Files, ".claude/rules/dev-standards-agent-harness.md")
+			put(t, dir, ".standards/state.json", string(engine.JSON(owned)))
+			if err := guardProject(dir, []string{".claude/rules/dev-standards-agent-harness.md"}, Default(Entry{}), cfg); err == nil {
+				t.Fatal("unowned Claude rule accepted")
 			}
 		})
 	}

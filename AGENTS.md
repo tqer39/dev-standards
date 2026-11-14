@@ -1,6 +1,7 @@
 # dev-standards の開発ルール
 
 回答と Markdown 文書は日本語にする。
+`--instruction-language en` 用の配布テンプレート `templates/base/claude-agent-harness.en.md` は英語を維持する。
 README.md と docs/decisions/0001-implementation-language.md を読んでから変更する。
 
 - 利用先の既存設定と無関係な変更を保持する。
