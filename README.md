@@ -23,11 +23,43 @@ macOS、Linux、Windows で同じ CLI と mise タスクを使用します。
 初回設定と運用条件は [自律保守](docs/autonomous-maintenance.md) を参照してください。
 
 Claude と Codex で実装からマージまでを進めるハーネスは [tqer39/agent-harness](https://github.com/tqer39/agent-harness) に分離しました。
+`adopt` と `onboard` は、Claude Code が実装依頼をこのハーネスへ渡すための
+`.claude/rules/dev-standards.md` を配置します。個人の `CLAUDE.md` やスキルの設定は不要です。
+使い方と前提条件は [Claude からの実装依頼](#claude-からの実装依頼) を参照してください。
 
 AGENTS.md を rulesync で生成している利用先では、共通の入口を rulesync のルールとして配置できます。
-dev-standards 自身による rulesync を使った他の LLM への配布、Renovate の共通設定、GitHub 管理設定の変更、
+Claude 向けのルールは rulesync の使用にかかわらず配置します。
+dev-standards 自身による rulesync を使ったその他の LLM への配布、Renovate の共通設定、GitHub 管理設定の変更、
 言語別の検証を自動構成する複数言語のモノレポ対応は後続の実装です。
 Node.js/npm を主コンポーネントとし、既存タスクで検証する Go/Swift パッケージを明示的に併設できます。
+
+## Claude からの実装依頼
+
+導入後のリポジトリで Claude Code を新しく起動すると、プロジェクトのルールとして
+`.claude/rules/dev-standards.md` が読み込まれます。通常のプロジェクト設定の読込を有効にしてください。
+「この不具合を修正して」などの依頼から、Claude が要件と受入条件を整理し、
+人間の承認後に `agent-harness run` で Codex の実装、Claude のレビュー、自動マージまで進めます。
+質問、調査、レビューだけの依頼や、Claude 自身による実装を明示した場合には適用しません。
+ハーネスのレビュー担当と自律保守には適用せず、再帰的な起動を防ぎます。
+
+これは LLM に渡す指示であり、すべての依頼の振り分けを機械的に強制する hook ではありません。
+`check` はルールの配置・内容を検査し、Claude の実際の選択までは検証しません。
+
+現在のハーネス本体は macOS 用です。ホストで別途導入し、`agent-harness` を PATH から実行できるようにします。
+Codex、Claude、GitHub、1Password の CLI、認証、権限設定もハーネスの運用手順に従って準備してください。
+dev-standards は認証情報を作成・複製せず、ハーネス本体の自動インストールも行いません。
+未準備や検査失敗の場合、Claude は理由を報告して停止します。
+ルールは全対応 OS に配置しますが、Linux/Windows でのハーネス実行に対応したことは意味しません。
+
+ハーネスは指定したリモートの基準ブランチから別の clone を作り、
+Orca などの現在のワークツリーの未コミット変更は自動では引き継ぎません。
+既存変更の続きを依頼する場合は、その変更を含むリモートブランチなど、実行の基準を先に確定します。
+
+ルールの正本は dev-standards の `templates/base/claude-agent-harness*.md` です。
+既存の同名ファイルを無断で取り込んだり上書きしたりしません。
+別名の `.claude/rules/*.md`、`CLAUDE.md`、既存スキルと個人設定は保持します。
+既存の導入先は新しい版への更新計画を確認・適用するとルールが追加されます。
+`--instruction-language en` では英語のルールを配置します。
 
 ## 開発環境の準備
 

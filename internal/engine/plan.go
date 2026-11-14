@@ -116,6 +116,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		m.Update.Rollout = "standard"
 	}
 	managedPaths := append([]string{}, managedPaths...)
+	managedPaths = append(managedPaths, claudeRulePath)
 	if len(automationPathsFor(m)) > 0 {
 		managedPaths = append(managedPaths, automationPathsFor(m)...)
 	}
@@ -123,6 +124,9 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		if _, err := read(name); err != nil {
 			return nil, err
 		}
+	}
+	if _, err := read(claudeRulePath); err != nil {
+		return nil, err
 	}
 	if err := validateManifest(m); err != nil {
 		return nil, err
@@ -342,6 +346,12 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		desired[".gitattributes"] = attrs
 	}
 	desired["mise.toml"] = file(rootMise)
+	if err := t.claudeFiles(p, desired, m); err != nil {
+		return nil, err
+	}
+	attrs := desired[".gitattributes"]
+	attrs.Content += "/" + claudeRulePath + " text eol=lf\n"
+	desired[".gitattributes"] = attrs
 	desired[".standards/tasks.standards.toml"] = file(tasksWithCompanions(m, p.Inputs[".standards/tasks.project.toml"].Content))
 	if len(automationPathsFor(m)) > 0 {
 		if err := t.automationFiles(p, desired, m); err != nil {
@@ -352,6 +362,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		desired[".standards/tasks.standards.toml"] = file(automatedTasksFor(tasksWithCompanions(m, p.Inputs[".standards/tasks.project.toml"].Content)))
 	}
 	required := append([]string{vendorPath}, componentInputs(component)...)
+	required = append(required, claudeRulePath)
 	for _, c := range m.Companions {
 		required = append(required, companionMarker(c))
 	}
