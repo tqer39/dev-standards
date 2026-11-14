@@ -24,7 +24,7 @@ macOS、Linux、Windows で同じ CLI と mise タスクを使用します。
 
 Claude と Codex で実装からマージまでを進めるハーネスは [tqer39/agent-harness](https://github.com/tqer39/agent-harness) に分離しました。
 `adopt` と `onboard` は、Claude Code が実装依頼をこのハーネスへ渡すための
-`.claude/rules/dev-standards.md` を配置します。個人の `CLAUDE.md` やスキルの設定は不要です。
+`.claude/rules/dev-standards-agent-harness.md` を配置します。個人の `CLAUDE.md` やスキルの設定は不要です。
 使い方と前提条件は [Claude からの実装依頼](#claude-からの実装依頼) を参照してください。
 
 AGENTS.md を rulesync で生成している利用先では、共通の入口を rulesync のルールとして配置できます。
@@ -36,7 +36,7 @@ Node.js/npm を主コンポーネントとし、既存タスクで検証する G
 ## Claude からの実装依頼
 
 導入後のリポジトリで Claude Code を新しく起動すると、プロジェクトのルールとして
-`.claude/rules/dev-standards.md` が読み込まれます。通常のプロジェクト設定の読込を有効にしてください。
+`.claude/rules/dev-standards-agent-harness.md` が読み込まれます。通常のプロジェクト設定の読込を有効にしてください。
 「この不具合を修正して」などの依頼から、Claude が要件と受入条件を整理し、
 人間の承認後に `agent-harness run` で Codex の実装、Claude のレビュー、自動マージまで進めます。
 質問、調査、レビューだけの依頼や、Claude 自身による実装を明示した場合には適用しません。
@@ -58,6 +58,7 @@ Orca などの現在のワークツリーの未コミット変更は自動では
 ルールの正本は dev-standards の `templates/base/claude-agent-harness*.md` です。
 既存の同名ファイルを無断で取り込んだり上書きしたりしません。
 別名の `.claude/rules/*.md`、`CLAUDE.md`、既存スキルと個人設定は保持します。
+rulesync が生成する `.claude/rules/dev-standards.md` とは別の名前を使い、管理対象の衝突を避けます。
 既存の導入先は新しい版への更新計画を確認・適用するとルールが追加されます。
 `--instruction-language en` では英語のルールを配置します。
 

@@ -9,7 +9,7 @@ LLM の起動には保存済みの ChatGPT ログインを使い、OpenAI API �
 | 実行箇所 | 処理 |
 | --- | --- |
 | AGENTS.md | 開発開始時にルールと適用状態を確認し、終了前に検証する手順を持つ |
-| .claude/rules/dev-standards.md | Claude の実装依頼を、受入条件の承認後に agent-harness へ渡す |
+| .claude/rules/dev-standards-agent-harness.md | Claude の実装依頼を、受入条件の承認後に agent-harness へ渡す |
 | SessionStart と UserPromptSubmit | ルールの状態と必要な対応を現在の LLM に渡す |
 | Stop | 現在のファイルに対応する検証記録がなければ、検証を要求する |
 | CI | LLM の報告とは独立して生成物の欠落・変更、静的解析、整形、テストを検証する |

@@ -24,6 +24,8 @@ func TestClaudeRuleAdoptionAcrossProfiles(t *testing.T) {
 			tree, req := fixture(t)
 			write(t, tree.Root, "CLAUDE.md", "# Existing instructions\n")
 			write(t, tree.Root, ".claude/rules/personal.md", "# Existing rule\n")
+			// rulesync already uses this name in real adopted repositories.
+			write(t, tree.Root, ".claude/rules/dev-standards.md", "# Existing rulesync output\n")
 			if name == "mise-project" {
 				req.InstructionLanguage = "en"
 			}
@@ -43,6 +45,9 @@ func TestClaudeRuleAdoptionAcrossProfiles(t *testing.T) {
 			}
 			if read(t, tree.Root, "CLAUDE.md") != "# Existing instructions\n" || read(t, tree.Root, ".claude/rules/personal.md") != "# Existing rule\n" {
 				t.Fatal("unrelated instructions overwritten")
+			}
+			if read(t, tree.Root, ".claude/rules/dev-standards.md") != "# Existing rulesync output\n" {
+				t.Fatal("existing rulesync output overwritten")
 			}
 			var state State
 			if err := strictJSON(read(t, tree.Root, ".standards/state.json"), &state); err != nil {

@@ -7,7 +7,7 @@ import (
 )
 
 // Claude loads project rules without requiring a personal CLAUDE.md or skill.
-const claudeRulePath = ".claude/rules/dev-standards.md"
+const claudeRulePath = ".claude/rules/dev-standards-agent-harness.md"
 
 func (t *Tree) claudeFiles(p *Plan, desired map[string]Snapshot, m Manifest) error {
 	var previous State
