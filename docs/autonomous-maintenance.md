@@ -26,7 +26,7 @@ hooks が利用できない環境でも AGENTS.md と CI、定期保守が機能
 開発ツールを準備し、実行ファイルをビルドする。
 
 ```sh
-mise bootstrap
+mise run bootstrap
 mise run check
 codex login status
 bin/dev-standards host-init --fleet .local/maintenance/fleet.json

@@ -3,8 +3,8 @@
   "id": "CORE-BOOTSTRAP",
   "revision": 2,
   "status": "active",
-  "title": "mise bootstrap で繰り返し実行できるセットアップ",
-  "rationale": "リポジトリのセットアップを mise bootstrap に集約し、必要なツールと依存関係を再現可能な手順で準備する。",
+  "title": "mise run bootstrap で繰り返し実行できるセットアップ",
+  "rationale": "リポジトリのセットアップを mise run bootstrap に集約し、必要なツールと依存関係を再現可能な手順で準備する。",
   "appliesTo": {
     "profiles": [
       "base"
@@ -29,7 +29,7 @@
   "remediation": {
     "mode": "automatic",
     "handler": "managed-file",
-    "instructions": "計画を確認して適用し、mise bootstrap でリポジトリのセットアップが完了するようにする。初回実行と再実行を確認し、check と verify の成功だけでセットアップを検証済みと扱わない。"
+    "instructions": "計画を確認して適用し、mise run bootstrap でリポジトリのセットアップが完了するようにする。初回実行と再実行を確認し、check と verify の成功だけでセットアップを検証済みと扱わない。"
   },
   "guidance": "guidance/core/bootstrap.md",
   "references": []

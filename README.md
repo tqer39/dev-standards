@@ -66,7 +66,7 @@ rulesync が生成する `.claude/rules/dev-standards.md` とは別の名前を�
 
 ## 開発環境の準備
 
-共通ルールとして、各リポジトリは `mise bootstrap` で開発環境のセットアップを完了できるようにします。
+共通ルールとして、各リポジトリは `mise run bootstrap` で開発環境のセットアップを完了できるようにします。
 前提条件の明記と初回・再実行の検証については [bootstrap のルール](guidance/core/bootstrap.md) を参照してください。
 
 Go と開発ツールの版は `mise.toml` に固定しています。
@@ -74,7 +74,7 @@ Go と開発ツールの版は `mise.toml` に固定しています。
 
 ```sh
 mise trust
-mise bootstrap
+mise run bootstrap
 mise run check
 ```
 
@@ -137,7 +137,7 @@ dev-standards adopt --profile go --decision decision.md --output .standards/plan
 ```sh
 dev-standards apply --plan .standards/plans/adopt.json
 mise trust
-mise bootstrap
+mise run bootstrap
 dev-standards check
 dev-standards verify
 ```

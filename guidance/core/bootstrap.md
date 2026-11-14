@@ -1,8 +1,9 @@
-# mise bootstrap で繰り返し実行できるセットアップ
+# mise run bootstrap で繰り返し実行できるセットアップ
 
-リポジトリのルートで `mise bootstrap` を実行すると、開発に必要なツールと依存関係の
-セットアップが完了するようにする。`mise bootstrap` は `mise run bootstrap` の短縮形であり、
-スクリプトや CI では `mise run bootstrap` を使用できる。
+リポジトリのルートで `mise run bootstrap` を実行すると、開発に必要なツールと依存関係の
+セットアップが完了するようにする。タスクを明示して呼び出す。
+`mise bootstrap` はマシン全体の設定も適用する組み込みコマンドなので、
+リポジトリのタスクを実行するときは `mise run bootstrap` を使用する。
 
 mise 自体の導入、設定内容を確認したうえでの `mise trust`、認証情報や OS 固有の前提条件は
 README に明記する。それ以外の自動化できるセットアップ手順は `bootstrap` タスクに集約する。
@@ -15,7 +16,7 @@ Go は `go mod download`、Python/uv は `uv sync --locked`、Node.js/npm は
 
 計画を確認して適用し、check と verify で確認する。
 これらは新規環境でのセットアップ成功を証明しないため、前提条件だけを準備した環境での
-`mise bootstrap` の初回実行と再実行を別途確認する。未実行の場合は未検証と記録する。
+`mise run bootstrap` の初回実行と再実行を別途確認する。未実行の場合は未検証と記録する。
 
 CI でも採用版の CLI で正本から再生成して照合する。保存済みスナップショット同士の一致だけで適合としない。
 
