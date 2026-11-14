@@ -68,6 +68,8 @@ rulesync が生成する `.claude/rules/dev-standards.md` とは別の名前を�
 
 共通ルールとして、各リポジトリは `mise run bootstrap` で開発環境のセットアップを完了できるようにします。
 前提条件の明記と初回・再実行の検証については [bootstrap のルール](guidance/core/bootstrap.md) を参照してください。
+`node-npm` の `project:bootstrap` は、ローカルと CI の両方で npm 依存の導入後に実行します。
+ブラウザーなど依存パッケージを必要とする追加の準備を、このタスクへ接続できます。
 
 Go と開発ツールの版は `mise.toml` に固定しています。
 内容を確認して trust を設定し、セットアップします。
