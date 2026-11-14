@@ -93,6 +93,9 @@ func TestNodeCIPreflightPreservesChecksAndOwnership(t *testing.T) {
 	if err := tree.Apply(plan); err != nil {
 		t.Fatal(err)
 	}
+	if got := read(t, tree.Root, versionLagWorkflowPath); got != versionLagWorkflow {
+		t.Fatal("version-lag workflow changed without a configured preflight")
+	}
 	write(t, tree.Root, "scripts/security.mjs", "process.exit(0);\n")
 	manifest := read(t, tree.Root, ".standards/repository.yml")
 	write(t, tree.Root, ".standards/repository.yml", strings.Replace(manifest, `"prBudgetSeconds":`, `"nodePreflight": "scripts/security.mjs", "prBudgetSeconds":`, 1))
@@ -109,8 +112,13 @@ func TestNodeCIPreflightPreservesChecksAndOwnership(t *testing.T) {
 			t.Fatalf("missing %s", required)
 		}
 	}
-	if strings.Index(workflow, "run: node scripts/security.mjs") > strings.Index(workflow, "uses: jdx/mise-action") {
+	if at := strings.Index(workflow, "run: node scripts/security.mjs"); at < 0 || at > strings.Index(workflow, "uses: jdx/mise-action") {
 		t.Fatal("preflight executes after dependency setup")
+	}
+	lag := read(t, tree.Root, versionLagWorkflowPath)
+	gate := "run: node scripts/security.mjs"
+	if at := strings.Index(lag, gate); strings.Count(lag, gate) != 1 || at < strings.Index(lag, "uses: actions/checkout@") || at > strings.Index(lag, "python3 - <<'PYTHON'") {
+		t.Fatal("version-lag preflight must execute once, after checkout and before the comparison")
 	}
 	commit(t, tree.Root)
 	again, err := tree.Plan(Request{Mode: "reapply"})

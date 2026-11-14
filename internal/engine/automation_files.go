@@ -133,7 +133,7 @@ func (t *Tree) automationFiles(p *Plan, desired map[string]Snapshot, m Manifest)
 		}
 	}
 	desired[".github/workflows/dev-standards.yml"] = file(componentWorkflow(m, p.Inputs[".standards/tasks.project.toml"].Content))
-	desired[versionLagWorkflowPath] = file(versionLagWorkflow)
+	desired[versionLagWorkflowPath] = file(versionLagWorkflowFor(m))
 	return nil
 }
 func (t *Tree) appendRuleGuidance(desired map[string]Snapshot) error {
@@ -252,6 +252,14 @@ jobs:
           print(f'the commit of dev-standards {oldest} is {age_days:.1f} days old, within the {grace_days}-day grace period')
           PYTHON
 `
+
+func versionLagWorkflowFor(m Manifest) string {
+	if m.CI.NodePreflight == "" {
+		return versionLagWorkflow
+	}
+	const compareStep = "      - name: Compare the applied version with published versions"
+	return strings.Replace(versionLagWorkflow, compareStep, "      - run: node "+m.CI.NodePreflight+"\n"+compareStep, 1)
+}
 
 const projectWorkflow = `name: Dev Standards
 on: [push, pull_request]
