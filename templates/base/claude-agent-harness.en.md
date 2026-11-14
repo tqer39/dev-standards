@@ -8,6 +8,9 @@ Also read this repository's `AGENTS.md` and `.standards/rules.md` when present.
 For feature implementation, bug fixes, or refactoring, delegate implementation to Codex
 through `agent-harness` even when the user does not name it. Claude prepares requirements
 and acceptance criteria. Do not apply this workflow to questions, investigation, or review alone.
+Adoption, updates, and maintenance of shared rules and settings managed by dev-standards are
+also excluded, even when requested directly by the user. Follow the existing shared maintenance
+workflow without waiting for additional approval.
 Follow an explicit user request for Claude to implement directly or to avoid the harness.
 When launched as a harness reviewer or autonomous maintenance worker, perform only that role.
 Never launch another harness recursively.
