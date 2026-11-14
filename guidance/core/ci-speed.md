@@ -28,8 +28,9 @@ GitHub Actions の CI は、待ち時間が開発と依存更新の流れを止�
 タグ push の検証が必要な利用先では `ci.pushBranches` を設定せず、既定の起動条件を維持する。
 
 タグ push の検証が不要で、作業ブランチを PR または手動実行で検証できる場合は、
-`.standards/repository.yml` の `ci.pushBranches` に実際の既定ブランチと、push 時に検証が
-必要なリリースブランチなどを列挙できる。設定時は、列挙したブランチへの push、すべての PR、
-手動実行で起動し、タグの push では起動しない。
+push で起動するブランチを限定できる。
+`.standards/repository.yml` の `ci.pushBranches` に、実際の既定ブランチと、
+push 時に検証が必要なリリースブランチなどを列挙する。
+設定時は、列挙したブランチへの push、すべての PR、手動実行で起動し、タグの push では起動しない。
 
 正本の変更後は `plan` と `apply` で再生成し、必要なイベントと必須ジョブが維持されていることを確認する。
