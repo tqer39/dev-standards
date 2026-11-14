@@ -110,7 +110,8 @@ run = "dev-standards verify"
 		}
 		if c.Profile == "node-npm" && task == "bootstrap" {
 			install := "npm --prefix " + c.Path + " ci --ignore-scripts"
-			base = strings.Replace(base, fmt.Sprintf("run = %q", install), fmt.Sprintf("run = [%q, %q]", install, "mise run "+extension), 1)
+			base = strings.Replace(base, fmt.Sprintf("[bootstrap]\nrun = %q", install), fmt.Sprintf("[bootstrap]\ndepends = [%q]\ndepends_post = [%q]\nrun = %q", "standards:bootstrap:npm", extension, "echo npm dependencies installed"), 1)
+			base += fmt.Sprintf("\n[\"standards:bootstrap:npm\"]\nrun = %q\n", install)
 			continue
 		}
 		header := "[" + task + "]\n"

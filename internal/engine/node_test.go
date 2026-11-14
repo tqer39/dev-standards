@@ -1,12 +1,14 @@
 package engine
 
 import (
+	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/BurntSushi/toml"
+	"time"
 )
 
 const nodePackage = `{"name":"sample","private":true,"scripts":{"lint":"oxlint .","format":"oxfmt --write .","format:check":"oxfmt --check .","test":"node --test","build":"tsc"}}`
@@ -263,16 +265,75 @@ func TestNodeWorkflowRetainsBootstrapExtensions(t *testing.T) {
 	if !strings.Contains(workflow, "npm ci --ignore-scripts --prefix .\n      - run: mise run project:bootstrap\n      - run: mise run lint") {
 		t.Fatal("bootstrap extension missing from CI")
 	}
-	var tasks struct {
-		Bootstrap struct {
-			Run     []string
-			Depends []string
-		}
+}
+
+func TestNodeBootstrapExtensionExecution(t *testing.T) {
+	if _, err := exec.LookPath("mise"); err != nil {
+		t.Skip("mise is required for task graph execution")
 	}
-	if _, err := toml.Decode(read(t, tree.Root, ".standards/tasks.standards.toml"), &tasks); err != nil {
+	tree, req := nodeFixture(t)
+	write(t, tree.Root, "mise.toml", "[tools]\nnode = \"24.21.0\"\n")
+	script := "const fs=require('node:fs');const phase=process.argv[1];const log=process.env.NODE_BOOTSTRAP_LOG;const lf=String.fromCharCode(10);" +
+		"if(phase==='extension'){if(!fs.existsSync(log))process.exit(7);if(!fs.readFileSync(log,'utf8').endsWith('install'+lf))process.exit(8);}" +
+		"fs.appendFileSync(log,phase+lf);if(phase==='install'){if(process.env.NODE_BOOTSTRAP_FAIL==='1')process.exit(3);}"
+	command := "node -e " + strings.TrimSpace(string(JSON(script))) + " -- "
+	extension := fmt.Sprintf("[\"project:bootstrap\"]\nrun = %q\n", command+"extension")
+	write(t, tree.Root, ".standards/tasks.project.toml", extension)
+	plan, err := tree.Plan(req)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tasks.Bootstrap.Depends) != 0 || len(tasks.Bootstrap.Run) != 2 || tasks.Bootstrap.Run[0] != "npm --prefix . ci --ignore-scripts" || tasks.Bootstrap.Run[1] != "mise run project:bootstrap" {
-		t.Fatal("local bootstrap must finish dependency installation before running its extension")
+	if err := tree.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	// Replace only the external installer; execute the generated graph with real Mise.
+	tasks := read(t, tree.Root, ".standards/tasks.standards.toml")
+	tasks = strings.Replace(tasks, `"npm --prefix . ci --ignore-scripts"`, fmt.Sprintf("%q", command+"install"), 1)
+	write(t, tree.Root, ".standards/tasks.standards.toml", tasks)
+	log := filepath.Join(t.TempDir(), "execution.log")
+	run := func(fail string) (string, error) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "mise", "run", "bootstrap")
+		cmd.Dir = tree.Root
+		cmd.Env = append(os.Environ(), "MISE_TRUSTED_CONFIG_PATHS="+tree.Root, "MISE_YES=1", "MISE_ACTIVATE_AGGRESSIVE=true", "NODE_BOOTSTRAP_LOG="+log, "NODE_BOOTSTRAP_FAIL="+fail)
+		output, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			t.Fatalf("bootstrap did not terminate: %s", output)
+		}
+		return string(output), err
+	}
+	for i := 1; i <= 2; i++ {
+		if output, err := run(""); err != nil {
+			t.Fatalf("bootstrap %d: %v\n%s", i, err, output)
+		}
+		if data, err := os.ReadFile(log); err != nil || string(data) != strings.Repeat("install\nextension\n", i) {
+			t.Fatalf("extension ran before installation: %q %v", data, err)
+		}
+	}
+	if err := os.Remove(log); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := run("1"); err == nil {
+		t.Fatalf("accepted failed installation: %s", output)
+	}
+	if data, err := os.ReadFile(log); err != nil || string(data) != "install\n" {
+		t.Fatalf("extension ran after failure: %q %v", data, err)
+	}
+	// A post-task may refer to its parent, but execution must stay in one graph.
+	_ = os.Remove(log)
+	write(t, tree.Root, ".standards/tasks.project.toml", extension+"depends = [\"bootstrap\"]\n")
+	output, err := run("")
+	if err != nil && !strings.Contains(strings.ToLower(output), "circular") {
+		t.Fatalf("unexpected back-edge failure: %v\n%s", err, output)
+	}
+	data, _ := os.ReadFile(log)
+	if strings.Count(string(data), "install\n") > 2 || strings.Count(string(data), "extension\n") > 1 {
+		t.Fatalf("bootstrap recursively reentered: %q", data)
+	}
+	write(t, tree.Root, ".standards/tasks.project.toml", extension+"depends = [\"cycle\"]\n[cycle]\ndepends = [\"project:bootstrap\"]\nrun = \"echo unreachable\"\n")
+	if output, err := run(""); err == nil || !strings.Contains(strings.ToLower(output), "circular") {
+		t.Fatalf("dependency cycle was not rejected: %v\n%s", err, output)
 	}
 }
