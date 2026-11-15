@@ -21,6 +21,9 @@ Never launch another harness recursively.
 2. Show them to the user and obtain approval. An implementation request alone is not approval
    of acceptance criteria. Explain that the harness runs implementation and review and can
    automatically merge a PR when its conditions are met.
+   Also recommend the implementation model and effort, with the reason. Recommend a
+   higher-tier model or `high` when mistakes would be hard to notice or revert, or when
+   the cause or approach is still undetermined. Otherwise keep the harness defaults.
 3. Check that `agent-harness` is on PATH, or use an executable location explicitly supplied
    by the user. Confirm the target GitHub repository and base branch, then run
    `agent-harness doctor --repo <owner>/<name>`. The current harness requires macOS and
@@ -32,6 +35,8 @@ Never launch another harness recursively.
    Preserve existing changes.
 5. Save the task and approved criteria to files and run this command with actual values.
    Add `--acceptance-patch <patch-file>` if acceptance tests were prepared as a patch.
+   Add `--model <model>` or `--effort <low|medium|high>` when a non-default model or
+   effort was approved.
 
    ```sh
    agent-harness run --repo <owner>/<name> --base <base-branch> \
