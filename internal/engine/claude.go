@@ -1,30 +1,24 @@
 package engine
 
-import (
-	"fmt"
-
-	bundle "github.com/tqer39/dev-standards"
-)
-
-// Claude loads project rules without requiring a personal CLAUDE.md or skill.
+// 旧版で記録した所有ファイルの移行だけに使う。
 const claudeRulePath = ".claude/rules/dev-standards-agent-harness.md"
 
-func (t *Tree) claudeFiles(p *Plan, desired map[string]Snapshot, m Manifest) error {
+func (t *Tree) claudeFiles(p *Plan, desired map[string]Snapshot) error {
 	var previous State
 	if p.Inputs[".standards/state.json"].Exists {
 		if err := strictJSON(p.Inputs[".standards/state.json"].Content, &previous); err != nil {
 			return err
 		}
 	}
-	if p.Inputs[claudeRulePath].Exists {
-		if _, owned := previous.Files[claudeRulePath]; !owned {
-			return fmt.Errorf("existing %s needs ownership resolution", claudeRulePath)
-		}
+	if !previous.Files[claudeRulePath].Exists {
+		// 個人のルールなど、所有していないファイルは移行対象に含めない。
+		return nil
 	}
-	template := "templates/base/claude-agent-harness.md"
-	if m.AI.Language == "en" {
-		template = "templates/base/claude-agent-harness.en.md"
+	current, err := t.Read(claudeRulePath)
+	if err != nil {
+		return err
 	}
-	desired[claudeRulePath] = file(bundle.Read(template))
+	p.Inputs[claudeRulePath] = current
+	desired[claudeRulePath] = Snapshot{}
 	return nil
 }
