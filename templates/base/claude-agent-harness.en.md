@@ -52,3 +52,13 @@ Use `--approved-by-human` only after acceptance criteria were approved in this c
 Use API key billing only at the user's explicit request. Report failures, usage-limit waits,
 or requests for human judgment and stop. Do not silently implement directly with Claude,
 run `clear-stop`, or merge with `gh pr merge` directly.
+
+## Working location
+
+Even when changing files without the harness, do not edit the original checkout of the default
+branch directly. Work in a `git worktree` or an Orca worktree.
+When changing another repository, create a worktree in that repository too. Do not edit a
+neighboring `../<repo>` directly.
+When handing work to another agent such as Codex, specify the target repository and worktree.
+Leave work handed to the harness to its working clone, and do not make the same change locally
+in parallel.
