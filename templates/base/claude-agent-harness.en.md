@@ -26,7 +26,8 @@ Never launch another harness recursively.
    the cause or approach is still undetermined. Otherwise keep the harness defaults.
 3. Check that `agent-harness` is on PATH, or use an executable location explicitly supplied
    by the user. Confirm the target GitHub repository and base branch, then run
-   `agent-harness doctor --repo <owner>/<name>`. The current harness requires macOS and
+   `agent-harness doctor --repo <owner>/<name>`, adding the same `--model <model>` when a
+   non-default model was approved. The current harness requires macOS and
    Codex, Claude, GitHub, and 1Password CLIs with authentication and permissions already set up.
    Report missing prerequisites or doctor failures and stop.
 4. The harness creates a separate working clone from the remote. It does not automatically

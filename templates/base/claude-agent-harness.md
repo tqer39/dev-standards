@@ -27,7 +27,8 @@ dev-standards が管理する共通ルール・設定の導入、更新、保守
 3. `agent-harness` が PATH 上にあることを確認する。
    ユーザーが実行ファイルの場所を明示した場合は、その場所を使ってよい。
    対象の GitHub リポジトリと基準ブランチを確認し、`agent-harness doctor --repo <owner>/<name>`
-   で前提条件を検査する。現在のハーネスは macOS 用で、Codex、Claude、GitHub、1Password の
+   で前提条件を検査する。既定以外のモデルが承認された場合は、`doctor` にも同じ
+   `--model <model>` を付ける。現在のハーネスは macOS 用で、Codex、Claude、GitHub、1Password の
    CLI と事前の認証・権限設定が必要。未導入や検査失敗の場合は理由を報告して止める。
 4. ハーネスはリモートから別の作業用 clone を準備する。現在のワークツリーの未コミット変更を
    自動では引き継がない。既存変更の続きを依頼された場合は、基準にするリモートブランチと
