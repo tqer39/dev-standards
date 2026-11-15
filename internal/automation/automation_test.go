@@ -666,7 +666,7 @@ func TestProjectInstructionOwnership(t *testing.T) {
 			}
 			for _, name := range []string{"AGENTS.md", ".rulesync/rules/dev-standards.md", ".claude/rules/dev-standards-agent-harness.md", ".claude/rules/dev-standards.md", ".claude/rules/personal.md"} {
 				put(t, dir, name, "candidate instruction\n")
-				want := name == ".claude/rules/dev-standards-agent-harness.md" || (name == "AGENTS.md" && mode == "") || (name == ".rulesync/rules/dev-standards.md" && mode == "rulesync")
+				want := (name == "AGENTS.md" && mode == "") || (name == ".rulesync/rules/dev-standards.md" && mode == "rulesync")
 				if err := guardProject(dir, []string{name}, Default(Entry{}), cfg); (err == nil) != want {
 					t.Fatalf("%s allowed=%v: %v", name, want, err)
 				}
@@ -1257,5 +1257,75 @@ func TestUnchangedSourceIsCheckpointedBeforeProjectVerification(t *testing.T) {
 	}
 	if recorded.PendingSource != base || len(recorded.Outcomes) != 1 || recorded.Outcomes[0].Status != "unchanged" {
 		t.Fatalf("source progress lost: %+v", recorded)
+	}
+}
+
+func TestProjectGuardRetiredRuleDeletion(t *testing.T) {
+	const rule = ".claude/rules/dev-standards-agent-harness.md"
+	for _, owned := range []bool{true, false} {
+		t.Run(fmt.Sprintf("owned=%v", owned), func(t *testing.T) {
+			dir := t.TempDir()
+			runGit(t, dir, "init", "--quiet")
+			runGit(t, dir, "config", "user.name", "Test")
+			runGit(t, dir, "config", "user.email", "test@example.com")
+			state := engine.State{SchemaVersion: 1, Files: map[string]engine.Snapshot{}}
+			if owned {
+				state.Files[rule] = engine.Snapshot{Exists: true, Content: "old rule\n", Mode: 0644}
+			}
+			put(t, dir, rule, "old rule\n")
+			put(t, dir, ".standards/state.json", string(engine.JSON(state)))
+			runGit(t, dir, "add", rule, ".standards/state.json")
+			runGit(t, dir, "commit", "-m", "initial")
+			cfg, err := os.ReadFile(filepath.Join(dir, ".git/config"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := guardProject(dir, []string{rule}, Default(Entry{}), cfg); err == nil {
+				t.Fatal("retired rule creation or modification accepted")
+			}
+			if err := os.Remove(filepath.Join(dir, rule)); err != nil {
+				t.Fatal(err)
+			}
+			delete(state.Files, rule)
+			put(t, dir, ".standards/state.json", string(engine.JSON(state)))
+			if err := guardProject(dir, []string{rule, ".standards/state.json"}, Default(Entry{}), cfg); (err == nil) != owned {
+				t.Fatalf("retired rule deletion allowed=%v: %v", owned, err)
+			}
+			put(t, dir, rule, "new rule\n")
+			if err := guardProject(dir, []string{rule}, Default(Entry{}), cfg); err == nil {
+				t.Fatal("retired rule reintroduction accepted")
+			}
+		})
+	}
+}
+
+func TestRetiredRuleRejectsChangedOrMissingCommittedInputs(t *testing.T) {
+	const rule = ".claude/rules/dev-standards-agent-harness.md"
+	for _, missing := range []string{"state", "rule", "changed"} {
+		t.Run(missing, func(t *testing.T) {
+			dir := t.TempDir()
+			runGit(t, dir, "init", "--quiet")
+			runGit(t, dir, "config", "user.name", "Test")
+			runGit(t, dir, "config", "user.email", "test@example.com")
+			state := engine.State{SchemaVersion: 1, Files: map[string]engine.Snapshot{rule: {Exists: true, Content: "baseline\n", Mode: 0644}}}
+			if missing != "state" {
+				put(t, dir, ".standards/state.json", string(engine.JSON(state)))
+			}
+			if missing != "rule" {
+				put(t, dir, rule, "committed human edit\n")
+			}
+			put(t, dir, "README.md", "initial\n")
+			runGit(t, dir, "add", "README.md")
+			if missing != "state" {
+				runGit(t, dir, "add", ".standards/state.json")
+			}
+			if missing != "rule" {
+				runGit(t, dir, "add", rule)
+			}
+			runGit(t, dir, "commit", "-m", "initial")
+			if _, err := retiredRuleContent(dir); err == nil {
+				t.Fatal("accepted missing ownership or committed human edit")
+			}
+		})
 	}
 }

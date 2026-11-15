@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -462,8 +463,19 @@ func guardProject(dir string, paths []string, c Config, cfg []byte) error {
 		return err
 	}
 	for _, p := range paths {
+		if p == ".claude/rules/dev-standards-agent-harness.md" {
+			// sync 後の状態からは既に所有記録が消えているため、変更前のコミットで
+			// 所有を確認し、削除だけを許可する。ルールの再作成は許可しない。
+			if _, err := os.Lstat(filepath.Join(dir, p)); !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("retired rule may only be deleted: %s", p)
+			}
+			if _, err := retiredRuleContent(dir); err != nil {
+				return err
+			}
+			continue
+		}
 		allowed := strings.HasPrefix(p, ".standards/") && !strings.HasPrefix(p, ".standards/cache/")
-		if p == "AGENTS.md" || p == ".rulesync/rules/dev-standards.md" || p == ".claude/rules/dev-standards-agent-harness.md" {
+		if p == "AGENTS.md" || p == ".rulesync/rules/dev-standards.md" {
 			tree, err := engine.Open(dir)
 			if err != nil {
 				return err
@@ -486,7 +498,7 @@ func guardProject(dir string, paths []string, c Config, cfg []byte) error {
 				return err
 			}
 			owned := s.Files[p].Exists
-			allowed = owned && (p == ".claude/rules/dev-standards-agent-harness.md" || (p == "AGENTS.md" && m.AI.Instructions != "rulesync") || (p == ".rulesync/rules/dev-standards.md" && m.AI.Instructions == "rulesync"))
+			allowed = owned && ((p == "AGENTS.md" && m.AI.Instructions != "rulesync") || (p == ".rulesync/rules/dev-standards.md" && m.AI.Instructions == "rulesync"))
 		}
 		for _, name := range []string{".codex/hooks.json", ".editorconfig", ".gitignore", ".gitattributes", "mise.toml", ".github/workflows/dev-standards.yml", ".github/workflows/dev-standards-version-lag.yml"} {
 			allowed = allowed || p == name
@@ -497,6 +509,27 @@ func guardProject(dir string, paths []string, c Config, cfg []byte) error {
 	}
 	return nil
 }
+
+func retiredRuleContent(dir string) ([]byte, error) {
+	const rule = ".claude/rules/dev-standards-agent-harness.md"
+	previous, err := exec.Command("git", "-C", dir, "show", "HEAD:.standards/state.json").Output()
+	if err != nil {
+		return nil, fmt.Errorf("read previous ownership: %w", err)
+	}
+	var state engine.State
+	if err := json.Unmarshal(previous, &state); err != nil {
+		return nil, err
+	}
+	if !state.Files[rule].Exists {
+		return nil, fmt.Errorf("retired rule was not owned: %s", rule)
+	}
+	content, err := exec.Command("git", "-C", dir, "show", "HEAD:"+rule).Output()
+	if err != nil || string(content) != state.Files[rule].Content {
+		return nil, fmt.Errorf("retired rule differs from committed ownership")
+	}
+	return content, nil
+}
+
 func guardBudget(dir string, paths []string, c Config, gitConfig []byte) error {
 	current, err := os.ReadFile(filepath.Join(dir, ".git/config"))
 	if err != nil || string(current) != string(gitConfig) {
@@ -512,6 +545,9 @@ func guardBudget(dir string, paths []string, c Config, gitConfig []byte) error {
 		}
 		for parent := p; parent != "."; parent = filepath.Dir(parent) {
 			info, err := os.Lstat(filepath.Join(dir, parent))
+			if parent == p && p == ".claude/rules/dev-standards-agent-harness.md" && errors.Is(err, os.ErrNotExist) {
+				continue
+			}
 			if err != nil {
 				return fmt.Errorf("deletion or missing changed file: %s", p)
 			}
@@ -520,6 +556,9 @@ func guardBudget(dir string, paths []string, c Config, gitConfig []byte) error {
 			}
 		}
 		b, err := os.ReadFile(filepath.Join(dir, p))
+		if p == ".claude/rules/dev-standards-agent-harness.md" && errors.Is(err, os.ErrNotExist) {
+			b, err = retiredRuleContent(dir)
+		}
 		if err != nil {
 			return err
 		}
