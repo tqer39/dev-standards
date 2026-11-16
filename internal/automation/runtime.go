@@ -1,15 +1,118 @@
 package automation
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/tqer39/dev-standards/internal/engine"
 )
+
+type runtimeIdentity struct {
+	Version string
+	Bundle  string
+}
+
+func executableName() string {
+	if runtimeWindows() {
+		return "dev-standards.exe"
+	}
+	return "dev-standards"
+}
+
+func (id runtimeIdentity) path(state string) string {
+	return filepath.Join(state, "runtimes", id.Version, id.Bundle, executableName())
+}
+
+func checkRuntimeParents(state, target string) error {
+	for dir := filepath.Dir(target); dir != filepath.Clean(state); dir = filepath.Dir(dir) {
+		info, err := os.Lstat(dir)
+		if err == nil && !info.IsDir() {
+			return fmt.Errorf("runtime parent must be a directory, not a symlink: %s", dir)
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if filepath.Dir(dir) == dir {
+			return fmt.Errorf("runtime path escapes state directory")
+		}
+	}
+	return nil
+}
+
+func inspectRuntime(ctx context.Context, x Executor, binary string) (runtimeIdentity, error) {
+	output, err := x.Run(ctx, "", binary, []string{"version"}, "")
+	if err != nil {
+		return runtimeIdentity{}, err
+	}
+	fields := strings.Fields(output)
+	if len(fields) != 3 || fields[0] != "dev-standards" || !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(fields[1]) || !regexp.MustCompile(`^bundle=[0-9a-f]{64}$`).MatchString(fields[2]) {
+		return runtimeIdentity{}, fmt.Errorf("invalid built CLI identity")
+	}
+	return runtimeIdentity{fields[1], strings.TrimPrefix(fields[2], "bundle=")}, nil
+}
+
+func publishRuntime(ctx context.Context, x Executor, binary, state string, id runtimeIdentity) (string, error) {
+	return publishRuntimeAt(ctx, x, binary, state, id, id.path(state))
+}
+
+func publishRuntimeAt(ctx context.Context, x Executor, binary, state string, id runtimeIdentity, destination string) (string, error) {
+	if err := checkRuntimeParents(state, destination); err != nil {
+		return "", err
+	}
+	if info, err := os.Lstat(destination); err == nil {
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("runtime must be a regular file: %s", destination)
+		}
+		actual, err := inspectRuntime(ctx, x, destination)
+		if err != nil {
+			return "", err
+		}
+		if actual != id {
+			return "", fmt.Errorf("immutable runtime identity conflict: %s", destination)
+		}
+		return destination, nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	// 完成したディレクトリだけを公開し、途中で失敗したコピーを選択させない。
+	parent := filepath.Dir(filepath.Dir(destination))
+	if err := os.MkdirAll(parent, 0700); err != nil {
+		return "", err
+	}
+	tmp, err := os.MkdirTemp(parent, ".runtime-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmp)
+	if err := copyExecutable(binary, filepath.Join(tmp, executableName())); err != nil {
+		return "", err
+	}
+	actual, err := inspectRuntime(ctx, x, filepath.Join(tmp, executableName()))
+	if err != nil {
+		return "", err
+	}
+	if actual != id {
+		return "", fmt.Errorf("copied runtime identity does not match publication")
+	}
+	// 実行ファイルだけが削除された空ディレクトリも回復する。非空なら保持して失敗する。
+	if err := os.Remove(filepath.Dir(destination)); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := os.Rename(tmp, filepath.Dir(destination)); err != nil {
+		return "", err
+	}
+	return destination, nil
+}
 
 func runtimeWindows() bool { return runtime.GOOS == "windows" }
 func copyExecutable(source, destination string) error {
@@ -67,6 +170,166 @@ func InstallRuntime(repo, binary, state string) error {
 		return os.WriteFile(target, b, 0600)
 	}
 	return nil
+}
+
+func refreshLaunchers(ctx context.Context, x Executor, entry Entry, binary, state string) error {
+	// 旧ランチャーは新しい保存形式を知らないため、hook のパスを保ったまま移行する。
+	if !sameHostState(entry.Path, state) {
+		return nil
+	}
+	output, err := git(ctx, x, entry.Path, "worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		return err
+	}
+	current, err := inspectRuntime(ctx, x, binary)
+	if err != nil {
+		return err
+	}
+	var diagnosticErrors []error
+	for _, field := range strings.Split(output, "\x00") {
+		path, ok := strings.CutPrefix(field, "worktree ")
+		if !ok || !sameHostState(path, state) {
+			continue
+		}
+		_, err := matchingRuntimeFor(ctx, path, current)
+		if err != nil {
+			if rescueErr := preserveLocalRuntime(ctx, x, path, state); rescueErr == nil {
+				_, err = matchingRuntimeFor(ctx, path, current)
+			} else {
+				err = fmt.Errorf("%w; local runtime preservation failed: %v", err, rescueErr)
+			}
+			if err != nil {
+				if err := deferLinkedLauncher(entry, path, fmt.Errorf("launcher migration would lose the adopted runtime for %s: %w", path, err)); err != nil {
+					if sameDirectory(path, entry.Path) {
+						return err
+					}
+					diagnosticErrors = append(diagnosticErrors, err)
+				}
+				continue
+			}
+		}
+		if err := requireLauncherIdentity(path); err != nil {
+			if err := deferLinkedLauncher(entry, path, err); err != nil {
+				if sameDirectory(path, entry.Path) {
+					return err
+				}
+				diagnosticErrors = append(diagnosticErrors, err)
+			}
+			continue
+		}
+		if err := InstallRuntime(path, binary, ""); err != nil {
+			if err := deferLinkedLauncher(entry, path, err); err != nil {
+				if sameDirectory(path, entry.Path) {
+					return err
+				}
+				diagnosticErrors = append(diagnosticErrors, err)
+			}
+		}
+	}
+	// 記録に失敗しても補助 worktree の処理は続け、最後に台帳へ診断を引き継ぐ。
+	return errors.Join(diagnosticErrors...)
+}
+
+func requireLauncherIdentity(repo string) error {
+	if isSource(repo) {
+		return nil
+	}
+	tree, err := engine.Open(repo)
+	if err != nil {
+		return err
+	}
+	defer tree.Close()
+	locked, err := tree.AppliedStandard()
+	if err != nil {
+		return err
+	}
+	if locked == nil {
+		// 採用版が分からない間は、復元に必要な唯一の実行ファイルを失わせない。
+		return fmt.Errorf("applied identity is missing; launcher retained")
+	}
+	return nil
+}
+
+func deferLinkedLauncher(entry Entry, path string, cause error) error {
+	if sameDirectory(path, entry.Path) {
+		return cause
+	}
+	// 補助 worktree の起動口は保持し、検証済みの登録先本体の展開を止めない。
+	message := fmt.Sprintf("linked worktree %s の起動口を保持した: %v", path, cause)
+	if feedbackSecretPattern.MatchString(message) {
+		return fmt.Errorf("secret-like content must not be recorded as feedback")
+	}
+	return Feedback(entry.Path, "runtime-migration", boundObservation(message))
+}
+
+func boundObservation(message string) string {
+	if len(message) <= feedbackObservationLimit {
+		return message
+	}
+	cut := feedbackObservationLimit
+	for cut > 0 && !utf8.RuneStart(message[cut]) {
+		cut--
+	}
+	return message[:cut]
+}
+
+func protectLegacyRuntime(binary string) error {
+	// Unix は親の書き込み権限、Windows はファイルの読み取り専用属性で旧版の置換を拒否する。
+	if err := os.Chmod(binary, 0500); err != nil {
+		return err
+	}
+	return os.Chmod(filepath.Dir(binary), 0500)
+}
+
+func preserveLocalRuntime(ctx context.Context, x Executor, repo, state string) error {
+	tree, err := engine.Open(repo)
+	if err != nil {
+		return err
+	}
+	locked, err := tree.AppliedStandard()
+	tree.Close()
+	if err != nil || locked == nil {
+		return fmt.Errorf("cannot preserve an unidentified local runtime: %v", err)
+	}
+	id := runtimeIdentity{locked.Version, locked.Bundle}
+	// 既存スロットの破損や別の版を、ローカルのコピーで上書きしない。
+	legacy := filepath.Join(state, "bundles", id.Bundle, executableName())
+	for _, target := range []string{id.path(state), legacy} {
+		if _, err := os.Lstat(target); !os.IsNotExist(err) {
+			return fmt.Errorf("runtime slot is already present: %s", target)
+		}
+	}
+	local := filepath.Join(repo, ".standards/cache", executableName())
+	actual, err := inspectRuntime(ctx, x, local)
+	if err != nil {
+		return err
+	}
+	if actual != id {
+		return fmt.Errorf("local runtime does not match the adoption")
+	}
+	// 旧セレクタも自分自身で終端できるよう、一致する旧形式スロットも保存する。
+	if _, err := publishRuntimeAt(ctx, x, local, state, id, legacy); err != nil {
+		return err
+	}
+	if err := protectLegacyRuntime(legacy); err != nil {
+		return err
+	}
+	_, err = publishRuntime(ctx, x, local, state, id)
+	return err
+}
+
+func sameHostState(repo, state string) bool {
+	located := hostState(repo)
+	return located != "" && sameDirectory(located, state)
+}
+
+func sameDirectory(leftPath, rightPath string) bool {
+	if filepath.Clean(leftPath) == filepath.Clean(rightPath) {
+		return true
+	}
+	left, leftErr := os.Stat(leftPath)
+	right, rightErr := os.Stat(rightPath)
+	return leftErr == nil && rightErr == nil && os.SameFile(left, right)
 }
 func readFeedback(c Config, state string) (string, error) {
 	var texts []string

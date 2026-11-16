@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	bundle "github.com/tqer39/dev-standards"
 	"github.com/tqer39/dev-standards/internal/engine"
 )
 
@@ -18,6 +19,10 @@ type HookInput struct {
 	Event  string `json:"hook_event_name"`
 	Active bool   `json:"stop_hook_active"`
 }
+
+const feedbackObservationLimit = 2048
+
+var feedbackSecretPattern = regexp.MustCompile(`(?i)(sk-[a-z0-9_-]{16,}|-----BEGIN .*PRIVATE KEY|(?:api[_-]?key|access[_-]?token)\s*[:=])`)
 
 func Root(cwd string) (string, error) {
 	b, err := exec.Command("git", "-C", cwd, "rev-parse", "--show-toplevel").Output()
@@ -34,7 +39,7 @@ func Prepare(ctx context.Context, repo string) (string, error) {
 		return "", err
 	}
 	{
-		executable, err := matchingRuntime(repo)
+		executable, err := matchingRuntime(ctx, repo)
 		if err != nil {
 			return "", err
 		}
@@ -74,6 +79,19 @@ func Finish(repo string) error {
 	if os.Getenv("DEV_STANDARDS_MAINTENANCE") == "1" {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	executable, err := matchingRuntime(ctx, repo)
+	if err != nil {
+		return err
+	}
+	if executable != "" {
+		output, err := exec.CommandContext(ctx, executable, "finish", "--repo", repo).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("finish failed: %w\n%s", err, output)
+		}
+		return nil
+	}
 	tree, err := engine.Open(repo)
 	if err != nil {
 		return err
@@ -101,10 +119,10 @@ func isSource(repo string) bool {
 	return err == nil && strings.Contains(string(b), "module github.com/tqer39/dev-standards\n")
 }
 func Feedback(repo, rule, message string) error {
-	if len(message) == 0 || len(message) > 2048 || len(rule) > 100 {
+	if len(message) == 0 || len(message) > feedbackObservationLimit || len(rule) > 100 {
 		return fmt.Errorf("feedback must contain a bounded observation")
 	}
-	if regexp.MustCompile(`(?i)(sk-[a-z0-9_-]{16,}|-----BEGIN .*PRIVATE KEY|(?:api[_-]?key|access[_-]?token)\s*[:=])`).MatchString(message) {
+	if feedbackSecretPattern.MatchString(message) {
 		return fmt.Errorf("secret-like content must not be recorded as feedback")
 	}
 	tree, err := engine.Open(repo)
@@ -168,60 +186,78 @@ func hostState(repo string) string {
 	}
 	return c.State
 }
-func matchingRuntime(repo string) (string, error) {
+func matchingRuntime(ctx context.Context, repo string) (string, error) {
+	return matchingRuntimeFor(ctx, repo, runtimeIdentity{Version: bundle.Version, Bundle: bundle.Digest()})
+}
+
+func matchingRuntimeFor(ctx context.Context, repo string, current runtimeIdentity) (string, error) {
+	// ソースの検証は checkout 内のコードを対象にし、保守台帳の公開版へ転送しない。
+	if isSource(repo) {
+		return "", nil
+	}
 	state := hostState(repo)
 	if state == "" {
 		return "", nil
 	}
-	b, err := os.ReadFile(filepath.Join(repo, ".standards/lock.json"))
-	var lock struct {
-		Bundle string `json:"bundleSha256"`
-	}
-	if err == nil {
-		if err = json.Unmarshal(b, &lock); err != nil {
-			return "", err
-		}
-	} else if isSource(repo) {
-		b, err = os.ReadFile(filepath.Join(state, "latest.json"))
-		if err != nil {
-			return "", nil
-		}
-		var ledger Ledger
-		if err = json.Unmarshal(b, &ledger); err != nil {
-			return "", err
-		}
-		lock.Bundle = ledger.Bundle
-		if lock.Bundle == "" {
-			return "", nil
-		}
-	} else {
-		return "", nil
-	}
-	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(lock.Bundle) {
-		return "", fmt.Errorf("invalid locked bundle")
-	}
-	name := "dev-standards"
-	if runtimeWindows() {
-		name += ".exe"
-	}
-	p := filepath.Join(state, "bundles", lock.Bundle, name)
-	if _, err := os.Stat(p); os.IsNotExist(err) {
-		return "", nil
-	} else if err != nil {
+	tree, err := engine.Open(repo)
+	if err != nil {
 		return "", err
 	}
-	self, _ := os.Executable()
-	selfInfo, selfErr := os.Stat(self)
-	targetInfo, targetErr := os.Stat(p)
-	if self == p || (selfErr == nil && targetErr == nil && os.SameFile(selfInfo, targetInfo)) {
+	locked, err := tree.AppliedStandard()
+	tree.Close()
+	if err != nil || locked == nil {
+		return "", err
+	}
+	wanted := runtimeIdentity{Version: locked.Version, Bundle: locked.Bundle}
+	// 一致する実行環境自身は、旧形式の共有キャッシュへ戻らない。
+	if wanted == current {
 		return "", nil
 	}
-	return p, nil
+	paths := []string{wanted.path(state), filepath.Join(state, "bundles", wanted.Bundle, executableName())}
+	for _, p := range paths {
+		if err := checkRuntimeParents(state, p); err != nil {
+			return "", err
+		}
+		info, err := os.Lstat(p)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("runtime must be a regular file: %s", p)
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		identity, err := inspectRuntime(probeCtx, Exec{}, p)
+		cancel()
+		if err != nil {
+			return "", err
+		}
+		if identity != wanted {
+			if p == paths[1] {
+				continue
+			}
+			return "", fmt.Errorf("cached runtime identity does not match lock: %s", p)
+		}
+		if p == paths[1] {
+			if err := protectLegacyRuntime(p); err != nil {
+				return "", err
+			}
+			protectedCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			protected, err := inspectRuntime(protectedCtx, Exec{}, p)
+			cancel()
+			if err != nil || protected != wanted {
+				return "", fmt.Errorf("legacy runtime changed while protecting it: %v", err)
+			}
+		}
+		return p, nil
+	}
+	return "", fmt.Errorf("runtime for dev-standards@%s bundle=%s is unavailable; restore that exact runtime or install a launcher with that exact version and bundle", wanted.Version, wanted.Bundle)
 }
 
-// MatchingRuntime selects the immutable executable for the adopted bundle.
-// Every verification entry point uses it; the fixed hook launcher stays stable.
-func MatchingRuntime(repo string) (string, error) { return matchingRuntime(repo) }
+// MatchingRuntime はロックの CLI 版とバンドルに一致する実行環境を選択する。
+func MatchingRuntime(repo string) (string, error) { return matchingRuntime(context.Background(), repo) }
 
 func advanceClean(ctx context.Context, repo string) error {
 	state := hostState(repo)
@@ -250,7 +286,7 @@ func advanceClean(ctx context.Context, repo string) error {
 	var entry *Entry
 	entries := append([]Entry{c.Source}, c.Projects...)
 	for i := range entries {
-		if entries[i].Path == repo {
+		if sameDirectory(entries[i].Path, repo) {
 			entry = &entries[i]
 			break
 		}
