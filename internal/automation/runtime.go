@@ -1,7 +1,9 @@
 package automation
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -122,20 +124,41 @@ func copyExecutable(source, destination string) error {
 	if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
 		return err
 	}
-	if info, err := os.Lstat(destination); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("runtime must not be a symlink")
+	var existing os.FileInfo
+	if info, err := os.Lstat(destination); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("runtime must not be a symlink")
+		}
+		existing = info
+	} else if !os.IsNotExist(err) {
+		return err
 	}
 	in, err := os.Open(source)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
+	if existing != nil && existing.Mode().IsRegular() && (runtimeWindows() || existing.Mode() == 0700) {
+		// 同一の起動口を再置換すると、Windows では実行後のファイル保持で失敗しうる。
+		// 識別子だけでなく内容を比較し、実装の違うバイナリを同一扱いしない。
+		same, err := sameExecutableContents(in, destination, existing)
+		if err != nil {
+			return err
+		}
+		if same {
+			return nil
+		}
+	}
 	tmp := destination + ".new"
 	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0700)
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp)
+	if err := out.Chmod(0700); err != nil {
+		_ = out.Close()
+		return err
+	}
 	_, err = io.Copy(out, in)
 	closeErr := out.Close()
 	if err != nil {
@@ -146,6 +169,40 @@ func copyExecutable(source, destination string) error {
 	}
 	return os.Rename(tmp, destination)
 }
+
+func sameExecutableContents(source *os.File, destination string, expected os.FileInfo) (bool, error) {
+	other, err := os.Open(destination)
+	if err != nil {
+		return false, err
+	}
+	defer other.Close()
+	opened, err := other.Stat()
+	if err != nil {
+		return false, err
+	}
+	if !os.SameFile(expected, opened) {
+		return false, fmt.Errorf("runtime changed during comparison")
+	}
+	sourceHash, destinationHash := sha256.New(), sha256.New()
+	if _, err := io.Copy(sourceHash, source); err != nil {
+		return false, err
+	}
+	if _, err := io.Copy(destinationHash, other); err != nil {
+		return false, err
+	}
+	if _, err := source.Seek(0, io.SeekStart); err != nil {
+		return false, err
+	}
+	current, err := os.Lstat(destination)
+	if err != nil {
+		return false, err
+	}
+	if !os.SameFile(opened, current) || current.Mode() != expected.Mode() {
+		return false, fmt.Errorf("runtime changed during comparison")
+	}
+	return bytes.Equal(sourceHash.Sum(nil), destinationHash.Sum(nil)), nil
+}
+
 func InstallRuntime(repo, binary, state string) error {
 	name := "dev-standards"
 	if runtimeWindows() {
