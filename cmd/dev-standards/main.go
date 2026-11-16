@@ -40,6 +40,7 @@ func execute(args []string, out, errOut io.Writer) error {
 	flags.SetOutput(errOut)
 	root := flags.String("repo", ".", "対象リポジトリのルート")
 	var output, profile, decision, planPath, componentPath, instructions, companionsPath, instructionLanguage string
+	var upgrade bool
 	switch command {
 	case "adopt":
 		flags.StringVar(&instructionLanguage, "instruction-language", "", "共通指示の言語: en（既定は日本語）")
@@ -51,6 +52,7 @@ func execute(args []string, out, errOut io.Writer) error {
 		flags.StringVar(&output, "output", "", "計画の保存先。省略すると JSON を標準出力へ出力")
 	case "plan":
 		flags.StringVar(&output, "output", "", "再適用計画の保存先")
+		flags.BoolVar(&upgrade, "upgrade", false, "この CLI の版とツールの固定値への更新を明示して計画")
 	case "apply":
 		flags.StringVar(&planPath, "plan", "", "保存済みの計画 JSON")
 	case "inspect", "check", "verify", "format-check", "catalog":
@@ -71,7 +73,8 @@ func execute(args []string, out, errOut io.Writer) error {
 		_, err = out.Write(engine.JSON(rules))
 		return err
 	}
-	if command == "check" || command == "verify" || command == "plan" {
+	// 更新計画は新しい CLI で作成し、採用済みの旧ランタイムへ委譲しない。
+	if command == "check" || command == "verify" || (command == "plan" && !upgrade) {
 		if handled, err := forwardRuntime(*root, command, args[1:], out, errOut); handled || err != nil {
 			return err
 		}
@@ -91,6 +94,9 @@ func execute(args []string, out, errOut io.Writer) error {
 		return err
 	case "adopt", "plan":
 		req := engine.Request{Mode: "reapply"}
+		if upgrade {
+			req.Mode = "upgrade"
+		}
 		if command == "adopt" {
 			req = engine.Request{Mode: "adopt", Profile: profile, DecisionPath: decision, ComponentPath: componentPath, Instructions: instructions, CompanionsPath: companionsPath, InstructionLanguage: instructionLanguage}
 		}
