@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	bundle "github.com/tqer39/dev-standards"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -337,16 +339,29 @@ func TestVersionLagDetection(t *testing.T) {
 		age  time.Duration
 	}
 	cases := []struct {
-		name    string
-		applied string
-		tags    []tag
-		failure string
+		name       string
+		applied    string
+		tags       []tag
+		failure    string
+		allowMajor bool
+		contains   string
 	}{
 		{name: "latest version applied", applied: "1.2.0", tags: []tag{{"v1.1.0", 30 * day}, {"v1.2.0", 30 * day}}},
 		{name: "newer version within grace period", applied: "1.2.0", tags: []tag{{"v1.2.0", 30 * day}, {"v1.3.0", day}}},
 		{name: "newer version past grace period", applied: "1.2.0", tags: []tag{{"v1.2.0", 30 * day}, {"v1.3.0", 8 * day}}, failure: "1.3.0"},
-		// A fresh latest tag must not reset the clock while the host stays stopped.
+		// 新しいタグやバックポートで最古のコミットの時計をリセットしない。
 		{name: "oldest unapplied version decides", applied: "1.2.0", tags: []tag{{"v1.3.0", 10 * day}, {"v1.4.0", day}}, failure: "1.3.0"},
+		{name: "major upgrades disabled", applied: "1.2.0", tags: []tag{{"v2.0.0", 30 * day}}, contains: "allowed by update.allowMajor=false"},
+		{name: "major upgrades allowed", applied: "1.2.0", tags: []tag{{"v2.0.0", 30 * day}}, allowMajor: true, failure: "2.0.0"},
+		{name: "allowed major within grace period", applied: "1.2.0", tags: []tag{{"v2.0.0", day}}, allowMajor: true},
+		{name: "blocked major cannot age a same-major update", applied: "1.2.0", tags: []tag{{"v1.3.0", day}, {"v2.0.0", 30 * day}}},
+		{name: "same-major update remains eligible", applied: "1.2.0", tags: []tag{{"v1.3.0", 8 * day}, {"v2.0.0", day}}, failure: "1.3.0"},
+		{name: "allowed major can be chronologically oldest", applied: "1.2.0", tags: []tag{{"v1.3.0", day}, {"v2.0.0", 8 * day}}, allowMajor: true, failure: "2.0.0"},
+		{name: "backport must not reset the oldest commit", applied: "1.2.0", tags: []tag{{"v1.4.0", 10 * day}, {"v1.3.0", day}}, failure: "1.4.0"},
+		{name: "multiple unapplied versions with backport", applied: "1.2.0", tags: []tag{{"v1.4.0", 10 * day}, {"v1.3.0", 8 * day}, {"v1.5.0", day}}, failure: "1.4.0"},
+		{name: "same timestamp uses numeric version as tie breaker", applied: "1.2.0", tags: []tag{{"v1.4.0", 8 * day}, {"v1.3.0", 8 * day}}, failure: "1.3.0"},
+		{name: "seven days is overdue", applied: "1.2.0", tags: []tag{{"v1.3.0", 7 * day}}, failure: "1.3.0"},
+		{name: "major zero keeps minor upgrades eligible", applied: "0.4.20", tags: []tag{{"v0.5.0", 8 * day}, {"v1.0.0", 30 * day}}, failure: "0.5.0"},
 		{name: "versions compare numerically", applied: "1.10.0", tags: []tag{{"v1.9.0", 30 * day}, {"v1.10.0", 30 * day}}},
 		{name: "applied version ahead of tags", applied: "1.3.0", tags: []tag{{"v1.2.0", 30 * day}}},
 		{name: "other tag formats ignored", applied: "1.2.0", tags: []tag{{"v1.2.0", 30 * day}, {"v1.3.0-rc1", 30 * day}, {"latest", 30 * day}}},
@@ -358,12 +373,16 @@ func TestVersionLagDetection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			upstream := t.TempDir()
 			gitIn(t, upstream, nil, "init", "--quiet")
+			now := time.Now()
 			for _, tag := range tt.tags {
-				date := time.Now().Add(-tag.age).Format(time.RFC3339)
+				date := now.Add(-tag.age).Format(time.RFC3339)
 				gitIn(t, upstream, []string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date}, "commit", "--allow-empty", "-qm", tag.name)
 				gitIn(t, upstream, nil, "tag", tag.name)
 			}
-			output, err := runVersionLagCheck(t, tt.applied, "file://"+upstream)
+			output, err := runVersionLagCheck(t, tt.applied, "file://"+upstream, tt.allowMajor)
+			if tt.contains != "" && !strings.Contains(output, tt.contains) {
+				t.Fatalf("通知対象の説明がありません: %s", output)
+			}
 			if tt.failure == "" {
 				if err != nil {
 					t.Fatalf("%v: %s", err, output)
@@ -381,24 +400,205 @@ func TestVersionLagFailsWhenSourceIsUnreachable(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the workflow runs on GitHub-hosted Linux")
 	}
-	if output, err := runVersionLagCheck(t, "1.2.0", "file://"+filepath.Join(t.TempDir(), "missing")); err == nil {
+	if output, err := runVersionLagCheck(t, "1.2.0", "file://"+filepath.Join(t.TempDir(), "missing"), false); err == nil {
 		t.Fatalf("an unreadable source was reported as up to date: %s", output)
 	}
 }
 
-func runVersionLagCheck(t *testing.T, applied, source string) (string, error) {
+func TestVersionLagUsesCommitDateRatherThanAnnotatedTagDate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("生成する workflow は GitHub-hosted Linux 上で実行する")
+	}
+	upstream := t.TempDir()
+	gitIn(t, upstream, nil, "init", "--quiet")
+	old := time.Now().Add(-8 * day).Format(time.RFC3339)
+	gitIn(t, upstream, []string{"GIT_AUTHOR_DATE=" + old, "GIT_COMMITTER_DATE=" + old}, "commit", "--allow-empty", "-qm", "古いコミット")
+	gitIn(t, upstream, []string{"GIT_COMMITTER_DATE=" + time.Now().Format(time.RFC3339)}, "tag", "-a", "-m", "新しい公開日時", "v1.3.0")
+	gitIn(t, upstream, nil, "commit", "--allow-empty", "-qm", "別 major の新しいコミット")
+	gitIn(t, upstream, nil, "tag", "v2.0.0")
+	for _, allowMajor := range []bool{false, true} {
+		if output, err := runVersionLagCheck(t, "1.2.0", "file://"+upstream, allowMajor); err == nil || !strings.Contains(output, "1.3.0") {
+			t.Fatalf("タグの作成日時で猶予期間を延長しました: allowMajor=%t %v %s", allowMajor, err, output)
+		}
+	}
+}
+
+func TestVersionLagFailsWhenCandidateReadFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("生成する workflow は GitHub-hosted Linux 上で実行する")
+	}
+	upstream := t.TempDir()
+	gitIn(t, upstream, nil, "init", "--quiet")
+	gitIn(t, upstream, nil, "commit", "--allow-empty", "-qm", "取得対象")
+	gitIn(t, upstream, nil, "tag", "v1.3.0")
+	gitIn(t, upstream, nil, "tag", "v2.0.0")
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"fetch", "log"} {
+		for _, allowMajor := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/allowMajor=%t", command, allowMajor), func(t *testing.T) {
+				bin := t.TempDir()
+				failure := "simulated candidate " + command + " failure"
+				script := "#!/bin/sh\nif [ \"$1\" = " + command + " ]; then echo '" + failure + "' >&2; exit 1; fi\nexec '" + strings.ReplaceAll(realGit, "'", "'\\''") + "' \"$@\"\n"
+				if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0755); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+				if output, err := runVersionLagCheck(t, "1.2.0", "file://"+upstream, allowMajor); err == nil || !strings.Contains(output, failure) {
+					t.Fatalf("候補一覧の取得後の失敗を成功扱いしました: %v %s", err, output)
+				}
+			})
+		}
+	}
+}
+
+func TestVersionLagPolicyRegeneratesThroughPlanAndApply(t *testing.T) {
+	tree := adoptWithAutomation(t)
+	commit(t, tree.Root)
+	var manifest Manifest
+	if err := json.Unmarshal([]byte(read(t, tree.Root, ".standards/repository.yml")), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Update.AllowMajor = true
+	write(t, tree.Root, ".standards/repository.yml", string(JSON(manifest)))
+	report, err := tree.Check()
+	if err == nil {
+		t.Fatal("正本だけを変更した未再生成の設定が check を通過しました")
+	}
+	found := false
+	for _, change := range report.Changes {
+		found = found || change.Path == versionLagWorkflowPath
+	}
+	if !found {
+		t.Fatal("check が未再生成の検知 workflow を報告していません")
+	}
+	plan, err := tree.Plan(Request{Mode: "reapply"})
+	if err != nil || len(plan.Conflicts) != 0 {
+		t.Fatalf("ポリシー変更の計画: %+v %v", plan, err)
+	}
+	if err := tree.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(read(t, tree.Root, versionLagWorkflowPath), "allow_major = True") {
+		t.Fatal("正本の更新ポリシーが workflow に反映されていません")
+	}
+	commit(t, tree.Root)
+	again, err := tree.Plan(Request{Mode: "reapply"})
+	if err != nil || len(again.Changes) != 0 {
+		t.Fatalf("再適用に差分があります: %+v %v", again, err)
+	}
+	edited := read(t, tree.Root, versionLagWorkflowPath) + "# 利用者の変更\n"
+	write(t, tree.Root, versionLagWorkflowPath, edited)
+	conflict, err := tree.Plan(Request{Mode: "reapply"})
+	if err != nil || len(conflict.Conflicts) != 1 {
+		t.Fatalf("生成物の衝突を検知しませんでした: %+v %v", conflict, err)
+	}
+	if err := tree.Apply(conflict); err == nil || read(t, tree.Root, versionLagWorkflowPath) != edited {
+		t.Fatal("衝突した計画の適用で利用者の変更を上書きしました")
+	}
+	manifest.CI.NodePreflight = "scripts/check.mjs"
+	document := parseWorkflow(t, versionLagWorkflowFor(manifest))
+	steps := document.Jobs["version-lag"].Steps
+	if len(steps) != 3 || steps[1].Run != "node scripts/check.mjs" || !strings.Contains(steps[2].Run, "allow_major = True") {
+		t.Fatal("major 許可と既存の事前検査を同時に生成できません")
+	}
+}
+
+func TestVersionLagMajorPolicyMatchesUpgradeGate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("生成する workflow は GitHub-hosted Linux 上で実行する")
+	}
+	parts, err := versionParts(bundle.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := fmt.Sprintf("%d.0.0", parts[0]+1)
+	source, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assets, err := os.ReadFile(filepath.Join(source, "assets.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	write(t, dir, "assets.go", strings.Replace(string(assets), `const Version = "`+bundle.Version+`"`, `const Version = "`+next+`"`, 1))
+	write(t, dir, "overlay.json", string(JSON(map[string]any{"Replace": map[string]string{filepath.Join(source, "assets.go"): filepath.Join(dir, "assets.go")}})))
+	binary := filepath.Join(dir, "dev-standards")
+	build := exec.Command("go", "build", "-overlay", filepath.Join(dir, "overlay.json"), "-o", binary, "./cmd/dev-standards")
+	build.Dir = source
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("次の major の検証用 CLI: %v %s", err, output)
+	}
+	upstream := t.TempDir()
+	gitIn(t, upstream, nil, "init", "--quiet")
+	date := time.Now().Add(-8 * day).Format(time.RFC3339)
+	gitIn(t, upstream, []string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date}, "commit", "--allow-empty", "-qm", "次の major")
+	gitIn(t, upstream, nil, "tag", "v"+next)
+	for _, allowMajor := range []bool{false, true} {
+		t.Run(fmt.Sprintf("allowMajor=%t", allowMajor), func(t *testing.T) {
+			tree := adoptWithAutomation(t)
+			var manifest Manifest
+			if err := json.Unmarshal([]byte(read(t, tree.Root, ".standards/repository.yml")), &manifest); err != nil {
+				t.Fatal(err)
+			}
+			manifest.Update.AllowMajor = allowMajor
+			write(t, tree.Root, ".standards/repository.yml", string(JSON(manifest)))
+			command := exec.Command(binary, "plan", "--upgrade", "--repo", tree.Root, "--output", filepath.Join(t.TempDir(), "upgrade.json"))
+			output, err := command.Output()
+			exit, ok := err.(*exec.ExitError)
+			want := 2
+			if allowMajor {
+				want = 1
+			}
+			if !ok || exit.ExitCode() != want {
+				t.Fatalf("更新ポリシーと計画の可否: %v %s", err, output)
+			}
+			if !allowMajor && !strings.Contains(string(exit.Stderr), "major upgrades are disabled") {
+				t.Fatalf("異なる理由で計画が失敗しました: %s", exit.Stderr)
+			}
+			if allowMajor {
+				var plan Plan
+				if err := json.Unmarshal(output, &plan); err != nil || plan.Version != next {
+					t.Fatalf("許可した major の計画を作成できません: %v %s", err, output)
+				}
+			}
+			notice, noticeErr := runVersionLagCheck(t, bundle.Version, "file://"+upstream, allowMajor)
+			if (allowMajor && (noticeErr == nil || !strings.Contains(notice, next))) || (!allowMajor && noticeErr != nil) {
+				t.Fatalf("更新ポリシーと通知対象が異なります: %v %s", noticeErr, notice)
+			}
+		})
+	}
+}
+
+func runVersionLagCheck(t *testing.T, applied, source string, allowMajor bool) (string, error) {
 	t.Helper()
-	document := parseWorkflow(t, versionLagWorkflow)
+	var manifest Manifest
+	manifest.Update.AllowMajor = allowMajor
+	document := parseWorkflow(t, versionLagWorkflowFor(manifest))
 	steps := document.Jobs["version-lag"].Steps
 	if len(steps) == 0 {
 		t.Fatal("version-lag job is missing")
 	}
 	checkout := t.TempDir()
 	gitIn(t, checkout, nil, "init", "--quiet")
+	gitIn(t, checkout, nil, "commit", "--allow-empty", "-qm", "利用先のコミット")
+	gitIn(t, checkout, nil, "tag", "v1.3.0")
+	before, err := exec.Command("git", "-C", checkout, "rev-parse", "refs/tags/v1.3.0").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
 	write(t, checkout, ".standards/lock.json", `{"version": "`+applied+`"}`)
-	return runWorkflowStep(t, checkout, steps[len(steps)-1].Run, []string{
+	output, checkErr := runWorkflowStep(t, checkout, steps[len(steps)-1].Run, []string{
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=url." + source + ".insteadOf",
 		"GIT_CONFIG_VALUE_0=https://github.com/tqer39/dev-standards.git",
 	})
+	after, err := exec.Command("git", "-C", checkout, "rev-parse", "refs/tags/v1.3.0").Output()
+	if err != nil || string(before) != string(after) {
+		t.Fatalf("利用先自身の同名タグを変更しました: %v", err)
+	}
+	return output, checkErr
 }
