@@ -273,6 +273,16 @@ mise run standards:version
 
 ## 再適用
 
+ツールの固定版や採用する共通ルールの版を更新するときは、更新先の CLI で
+`dev-standards plan --upgrade --output .standards/plans/upgrade.json` を実行します。
+変更計画を確認し、同じ更新先の CLI で `apply --plan .standards/plans/upgrade.json` を実行してください。
+保守台帳へは登録せず、手動採用の利用先を自律保守へ切り替えません。
+自律保守を採用済みの場合は、その宣言に従って hooks と CI も再生成します。
+更新計画では `.standards/repository.yml` を JSON 形式へ整え、元の YAML コメントは保持しません。
+この差分も計画に表示するため、適用前に確認してください。
+通常の `plan` はロックを暗黙に更新せず、生成物の直接編集、古い版への更新、
+計画作成後の入力変更に対する既存の保護も維持します。
+
 ```sh
 dev-standards plan --output .standards/plans/reapply.json
 dev-standards apply --plan .standards/plans/reapply.json
