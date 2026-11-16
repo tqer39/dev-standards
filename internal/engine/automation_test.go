@@ -44,7 +44,7 @@ func TestAutomationAdoptionAndStableHooks(t *testing.T) {
 		t.Fatal("lost original instructions")
 	}
 	rulesText := read(t, tree.Root, ".standards/rules.md")
-	for _, want := range []string{"## CORE-ACTIONS-SECURITY", "## CORE-CI-SPEED", "## CORE-RENOVATE-GROUPING"} {
+	for _, want := range []string{"## CORE-ACTIONS-SECURITY", "## CORE-CI-SPEED", "## CORE-RENOVATE-GROUPING", "## PROCESS-PROJECT-TRACKING"} {
 		if !strings.Contains(rulesText, want) {
 			t.Fatalf("rule guidance not distributed: %s", want)
 		}

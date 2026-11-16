@@ -27,6 +27,14 @@ dev-standards 自身による rulesync を使ったその他の LLM への配布
 言語別の検証を自動構成する複数言語のモノレポ対応は後続の実装です。
 Node.js/npm を主コンポーネントとし、既存タスクで検証する Go/Swift パッケージを明示的に併設できます。
 
+## Issue と横断 Projects による進捗管理
+
+Codex が作業開始・進捗・終了時に Issue と横断 Project を更新する手順を共通ルールとして配布します。
+自律保守または rulesync の共通指示の入口を導入した利用先に、`.standards/rules.md` として届きます。
+Issue には受入条件、日時、検証結果、残条件を残し、Project の Status と日付で全体を確認します。
+設定と初回確認は [横断プロジェクト管理](docs/project-management.md) を参照してください。
+GitHub への更新は Codex が行い、`check` と `verify` は更新済みとは判定せず `review_required` と報告します。
+
 ## 旧委譲ルールの移行
 
 旧版で配布していた `.claude/rules/dev-standards-agent-harness.md` は廃止しました。

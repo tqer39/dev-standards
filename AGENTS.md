@@ -13,6 +13,7 @@ README.md と docs/decisions/0001-implementation-language.md を読んでから�
 ## 通常開発と自律保守
 
 - 開始時に `mise run standards:prepare`、終了前に `mise run session:verify` と `mise run standards:finish` を実行する。
+- `docs/project-management.md` と `guidance/core/project-tracking.md` に従い、作業開始・進捗・終了時に Issue と横断 Project を更新する。
 - 自律保守の原則と初回設定は `docs/autonomous-maintenance.md` を参照する。
 - 共通の問題は観測と根拠だけを `dev-standards feedback` に記録する。
 - 保守のための人間の追加指示・承認を待たず、設定済み台帳と保守処理へ引き継ぐ。
