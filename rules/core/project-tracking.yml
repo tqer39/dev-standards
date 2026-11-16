@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "PROCESS-PROJECT-TRACKING",
+  "revision": 1,
+  "status": "active",
+  "title": "Issue と横断 Projects に作業の状態と根拠を残す",
+  "rationale": "会話や作業環境が変わっても、何をいつどこまで進めたかと残る条件を一覧で把握できるようにする。",
+  "appliesTo": {"profiles": ["base"]},
+  "phases": ["adopt", "pr", "scheduled", "release"],
+  "enforcement": {"level": "warning", "waivable": false},
+  "checks": [
+    {"id": "review", "type": "review", "handler": "project-tracking", "parameters": {}}
+  ],
+  "remediation": {
+    "mode": "assisted",
+    "handler": "project-tracking",
+    "instructions": "既存の Issue と Project の設定を確認し、開始・進捗・終了の状態、日時、根拠、残条件を更新する。未反映は未反映として報告する。"
+  },
+  "guidance": "guidance/core/project-tracking.md",
+  "references": [
+    "https://cli.github.com/manual/gh_project",
+    "https://cli.github.com/manual/gh_project_item-edit",
+    "https://docs.github.com/en/issues/planning-and-tracking-with-projects/customizing-views-in-your-project/customizing-the-table-layout"
+  ]
+}
