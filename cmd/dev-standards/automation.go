@@ -39,7 +39,7 @@ func automationCommand(command string, args []string, out, errOut io.Writer) err
 	if err != nil {
 		return err
 	}
-	if command == "prepare" || command == "finish" || command == "hook" || command == "session-verify" {
+	if command == "finish" || command == "session-verify" {
 		if handled, err := forwardRuntime(root, command, args, out, errOut); handled || err != nil {
 			return err
 		}

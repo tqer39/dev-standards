@@ -26,6 +26,7 @@ type fakeCodex struct {
 	Inputs                   []string
 	SkipValidation           bool
 	PanicProjectVerification bool
+	FailLauncherRefreshPath  string
 	RemoteAlias              map[string]string
 	CIResponse               string
 }
@@ -33,6 +34,14 @@ type fakeCodex struct {
 func (f *fakeCodex) Run(ctx context.Context, dir, exe string, args []string, input string) (string, error) {
 	f.Calls = append(f.Calls, append([]string{exe}, args...))
 	f.Inputs = append(f.Inputs, input)
+	if exe == "git" && f.FailLauncherRefreshPath != "" && sameDirectory(dir, f.FailLauncherRefreshPath) {
+		for i := range args {
+			if args[i] == "worktree" && i+1 < len(args) && args[i+1] == "list" {
+				f.FailLauncherRefreshPath = ""
+				return "", fmt.Errorf("ランチャー更新の一時的な失敗")
+			}
+		}
+	}
 	if exe == "git" && len(f.RemoteAlias) > 0 {
 		args = append([]string{}, args...)
 		for i, arg := range args {
@@ -237,14 +246,21 @@ func TestFleetUpdatesSourceAndProjectWithoutHumanApproval(t *testing.T) {
 	c := Default(Entry{Path: source, Remote: sourceRemote, Branch: "main", Role: "source"})
 	c.Projects = []Entry{{Path: project, Remote: remote, Branch: "main", Role: "project", Canary: true}}
 	state := filepath.Join(root, "state")
-	fake := &fakeCodex{}
-	m := Maintainer{Commands: fake, Now: func() time.Time { return time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC) }}
-	report, err := m.Run(context.Background(), c, state)
-	if err != nil {
+	oldBinary := buildRuntime(t, bundle.Version)
+	if _, err := publishRuntime(context.Background(), Exec{}, oldBinary, state, runtimeIdentity{bundle.Version, bundle.Digest()}); err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Outcomes) != 2 || report.Outcomes[0].Status != "updated" || report.Outcomes[1].Status != "updated" {
-		t.Fatalf("rollout not completed: %+v", report)
+	if err := InstallRuntime(project, oldBinary, state); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeCodex{FailLauncherRefreshPath: project}
+	m := Maintainer{Commands: fake, Now: func() time.Time { return time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC) }}
+	report, err := m.Run(context.Background(), c, state)
+	if err == nil || !strings.Contains(err.Error(), "launcher migration") {
+		t.Fatalf("反映後の起動口更新失敗を検出しませんでした: %v", err)
+	}
+	if len(report.Outcomes) != 3 || report.Outcomes[0].Status != "updated" || report.Outcomes[1].Status != "updated" || report.Outcomes[1].Commit == "" || report.PendingSource == "" {
+		t.Fatalf("公開済みコミットや再開情報が失われました: %+v", report)
 	}
 	if fake.Reviews != 2 {
 		t.Fatalf("expected separate source and project reviews: %d", fake.Reviews)
@@ -261,6 +277,15 @@ func TestFleetUpdatesSourceAndProjectWithoutHumanApproval(t *testing.T) {
 	if report.Bundle == bundle.Digest() {
 		t.Fatal("policy bundle was not updated")
 	}
+	put(t, checked, ".standards/cache/host.json", string(mustJSON(t, map[string]string{"state": state})))
+	t.Setenv("DEV_STANDARDS_MAINTENANCE", "")
+	selected, err := MatchingRuntime(checked)
+	if err != nil || selected != report.Executable || !strings.Contains(selected, string(filepath.Separator)+"runtimes"+string(filepath.Separator)) {
+		t.Fatalf("保守が公開した実行環境を選択できません: %s %v", selected, err)
+	}
+	if output, err := Prepare(context.Background(), checked); err != nil || !strings.Contains(output, "適用版:") {
+		t.Fatalf("保守反映後の prepare: %s %v", output, err)
+	}
 	// A second cycle must be a no-op and must not re-run learning/review.
 	again, err := m.Run(context.Background(), c, state)
 	if err != nil {
@@ -273,6 +298,10 @@ func TestFleetUpdatesSourceAndProjectWithoutHumanApproval(t *testing.T) {
 	}
 	if fake.Changes != 1 || fake.Reviews != 2 {
 		t.Fatal("maintenance loop repeated completed work")
+	}
+	installed, err := inspectRuntime(context.Background(), Exec{}, filepath.Join(project, ".standards/cache", executableName()))
+	if err != nil || installed.path(state) != again.Executable {
+		t.Fatalf("公開を繰り返さずに起動口更新を回復できません: %+v %v", installed, err)
 	}
 }
 func TestAgentReviewFailureIsNotPublished(t *testing.T) {
@@ -532,18 +561,6 @@ func TestPrepareAdvancesOnlyCleanDefaultBranch(t *testing.T) {
 	}
 	if runGit(t, project, "rev-parse", "HEAD") != wanted {
 		t.Fatal("verified maintenance was not applied on a later cycle")
-	}
-	digest := strings.Repeat("a", 64)
-	name := "dev-standards"
-	if runtimeWindows() {
-		name += ".exe"
-	}
-	binary := filepath.Join(state, "bundles", digest, name)
-	put(t, state, filepath.Join("bundles", digest, name), "fixture")
-	put(t, project, ".standards/lock.json", string(mustJSON(t, map[string]string{"bundleSha256": digest})))
-	selected, err := MatchingRuntime(project)
-	if err != nil || selected != binary {
-		t.Fatalf("adopted runtime not selected: %s %v", selected, err)
 	}
 }
 func mustJSON(t *testing.T, v any) []byte {

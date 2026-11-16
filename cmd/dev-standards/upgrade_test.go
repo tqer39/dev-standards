@@ -160,6 +160,14 @@ func TestExplicitUpgradeUsesRequestedCLIInsteadOfCachedRuntime(t *testing.T) {
 	if err := json.Unmarshal(f.read(".standards/lock.json"), &lock); err != nil {
 		t.Fatal(err)
 	}
+	lock.Version = "0.0.1"
+	f.write(".standards/lock.json", engine.JSON(lock))
+	var manifest engine.Manifest
+	if err := json.Unmarshal(f.read(".standards/repository.yml"), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Standard.Version = lock.Version
+	f.write(".standards/repository.yml", engine.JSON(manifest))
 	state := t.TempDir()
 	name := "dev-standards"
 	if runtime.GOOS == "windows" {
@@ -175,7 +183,7 @@ func TestExplicitUpgradeUsesRequestedCLIInsteadOfCachedRuntime(t *testing.T) {
 	}
 	b, _ := json.Marshal(map[string]string{"state": state})
 	f.write(".standards/cache/host.json", b)
-	// 設定が正常な時点では、委譲されない通常の plan は成功するはずである。
+	// 通常の plan は旧実行環境の識別検査で失敗する。明示的な更新は指定された CLI で行う。
 	f.invoke(2, "plan")
 	f.changeNode("24.22.2")
 	f.invoke(1, "plan", "--upgrade")

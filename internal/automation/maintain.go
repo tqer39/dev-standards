@@ -187,32 +187,26 @@ func (m Maintainer) Run(ctx context.Context, c Config, state string) (Ledger, er
 	if _, err = x.Run(ctx, source, "go", []string{"build", "-o", binary, "./cmd/dev-standards"}, ""); err != nil {
 		return finish(err)
 	}
-	versionInfo, err := x.Run(ctx, source, binary, []string{"version"}, "")
+	identity, err := inspectRuntime(ctx, x, binary)
 	if err != nil {
 		return finish(err)
 	}
-	fields := strings.Fields(versionInfo)
-	if len(fields) < 3 || !strings.HasPrefix(fields[2], "bundle=") {
-		return finish(fmt.Errorf("invalid built CLI identity"))
-	}
-	digest := strings.TrimPrefix(fields[2], "bundle=")
-	if len(digest) != 64 {
-		return finish(fmt.Errorf("invalid bundle digest"))
-	}
-	destination := filepath.Join(state, "bundles", digest, "dev-standards")
-	if runtimeWindows() {
-		destination += ".exe"
-	}
-	if err = copyExecutable(binary, destination); err != nil {
+	destination, err := publishRuntime(ctx, x, binary, state, identity)
+	if err != nil {
 		return finish(err)
 	}
 	if err = tagRelease(ctx, x, source, c.Source); err != nil {
 		return finish(err)
 	}
+	// 台帳と利用先の起動口は、再ビルドした候補ではなく同じ公開済み成果物を参照する。
+	binary = destination
 	report.PendingSource = report.Outcomes[0].Commit
-	report.Bundle = digest
+	report.Bundle = identity.Bundle
 	report.Executable = destination
 	if err := saveLedger(state, report); err != nil {
+		return finish(err)
+	}
+	if err := refreshLaunchers(ctx, x, c.Source, binary, state); err != nil {
 		return finish(err)
 	}
 	projects := append([]Entry{}, c.Projects...)
@@ -222,6 +216,9 @@ func (m Maintainer) Run(ctx context.Context, c Config, state string) (Ledger, er
 		report.Outcomes = append(report.Outcomes, o)
 		if err != nil {
 			return finish(err)
+		}
+		if err := refreshLaunchers(ctx, x, e, binary, state); err != nil {
+			return finish(fmt.Errorf("launcher migration for %s: %w", e.Remote, err))
 		}
 	}
 	if learn {
