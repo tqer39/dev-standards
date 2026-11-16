@@ -11,7 +11,8 @@
     "CORE-ACTIONS-SECURITY",
     "CORE-CI-SPEED",
     "CORE-RENOVATE-GROUPING",
-    "PROCESS-LANGUAGE"
+    "PROCESS-LANGUAGE",
+    "PROCESS-PROJECT-TRACKING"
   ],
   "platforms": [
     "macos",
