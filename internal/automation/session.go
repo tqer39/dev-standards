@@ -20,6 +20,10 @@ type HookInput struct {
 	Active bool   `json:"stop_hook_active"`
 }
 
+const feedbackObservationLimit = 2048
+
+var feedbackSecretPattern = regexp.MustCompile(`(?i)(sk-[a-z0-9_-]{16,}|-----BEGIN .*PRIVATE KEY|(?:api[_-]?key|access[_-]?token)\s*[:=])`)
+
 func Root(cwd string) (string, error) {
 	b, err := exec.Command("git", "-C", cwd, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
@@ -115,10 +119,10 @@ func isSource(repo string) bool {
 	return err == nil && strings.Contains(string(b), "module github.com/tqer39/dev-standards\n")
 }
 func Feedback(repo, rule, message string) error {
-	if len(message) == 0 || len(message) > 2048 || len(rule) > 100 {
+	if len(message) == 0 || len(message) > feedbackObservationLimit || len(rule) > 100 {
 		return fmt.Errorf("feedback must contain a bounded observation")
 	}
-	if regexp.MustCompile(`(?i)(sk-[a-z0-9_-]{16,}|-----BEGIN .*PRIVATE KEY|(?:api[_-]?key|access[_-]?token)\s*[:=])`).MatchString(message) {
+	if feedbackSecretPattern.MatchString(message) {
 		return fmt.Errorf("secret-like content must not be recorded as feedback")
 	}
 	tree, err := engine.Open(repo)

@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tqer39/dev-standards/internal/engine"
 )
@@ -183,6 +185,7 @@ func refreshLaunchers(ctx context.Context, x Executor, entry Entry, binary, stat
 	if err != nil {
 		return err
 	}
+	var diagnosticErrors []error
 	for _, field := range strings.Split(output, "\x00") {
 		path, ok := strings.CutPrefix(field, "worktree ")
 		if !ok || !sameHostState(path, state) {
@@ -197,16 +200,52 @@ func refreshLaunchers(ctx context.Context, x Executor, entry Entry, binary, stat
 			}
 			if err != nil {
 				if err := deferLinkedLauncher(entry, path, fmt.Errorf("launcher migration would lose the adopted runtime for %s: %w", path, err)); err != nil {
-					return err
+					if sameDirectory(path, entry.Path) {
+						return err
+					}
+					diagnosticErrors = append(diagnosticErrors, err)
 				}
 				continue
 			}
 		}
+		if err := requireLauncherIdentity(path); err != nil {
+			if err := deferLinkedLauncher(entry, path, err); err != nil {
+				if sameDirectory(path, entry.Path) {
+					return err
+				}
+				diagnosticErrors = append(diagnosticErrors, err)
+			}
+			continue
+		}
 		if err := InstallRuntime(path, binary, ""); err != nil {
 			if err := deferLinkedLauncher(entry, path, err); err != nil {
-				return err
+				if sameDirectory(path, entry.Path) {
+					return err
+				}
+				diagnosticErrors = append(diagnosticErrors, err)
 			}
 		}
+	}
+	// 記録に失敗しても補助 worktree の処理は続け、最後に台帳へ診断を引き継ぐ。
+	return errors.Join(diagnosticErrors...)
+}
+
+func requireLauncherIdentity(repo string) error {
+	if isSource(repo) {
+		return nil
+	}
+	tree, err := engine.Open(repo)
+	if err != nil {
+		return err
+	}
+	defer tree.Close()
+	locked, err := tree.AppliedStandard()
+	if err != nil {
+		return err
+	}
+	if locked == nil {
+		// 採用版が分からない間は、復元に必要な唯一の実行ファイルを失わせない。
+		return fmt.Errorf("applied identity is missing; launcher retained")
 	}
 	return nil
 }
@@ -216,7 +255,22 @@ func deferLinkedLauncher(entry Entry, path string, cause error) error {
 		return cause
 	}
 	// 補助 worktree の起動口は保持し、検証済みの登録先本体の展開を止めない。
-	return Feedback(entry.Path, "runtime-migration", fmt.Sprintf("linked worktree %s の起動口を保持した: %v", path, cause))
+	message := fmt.Sprintf("linked worktree %s の起動口を保持した: %v", path, cause)
+	if feedbackSecretPattern.MatchString(message) {
+		return fmt.Errorf("secret-like content must not be recorded as feedback")
+	}
+	return Feedback(entry.Path, "runtime-migration", boundObservation(message))
+}
+
+func boundObservation(message string) string {
+	if len(message) <= feedbackObservationLimit {
+		return message
+	}
+	cut := feedbackObservationLimit
+	for cut > 0 && !utf8.RuneStart(message[cut]) {
+		cut--
+	}
+	return message[:cut]
 }
 
 func protectLegacyRuntime(binary string) error {
