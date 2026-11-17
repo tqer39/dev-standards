@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "PROCESS-AI-DISCLOSURE",
+  "revision": 1,
+  "status": "active",
+  "title": "AI が実装した PR の本文先頭に明示文を記載する",
+  "rationale": "実装したエージェントや PR の作成手段によらず、AI の関与を同じ表記で伝える。",
+  "appliesTo": {"profiles": ["base"]},
+  "phases": ["adopt", "pr", "scheduled", "release"],
+  "enforcement": {"level": "warning", "waivable": false},
+  "checks": [
+    {"id": "review", "type": "review", "handler": "ai-disclosure", "parameters": {}}
+  ],
+  "remediation": {
+    "mode": "assisted",
+    "handler": "ai-disclosure",
+    "instructions": "AI が実装に関与した PR の本文先頭に固定文を1回だけ記載し、既存本文を保持する。作成・更新後に保存された本文を読み直して確認する。"
+  },
+  "guidance": "guidance/core/ai-disclosure.md",
+  "references": []
+}

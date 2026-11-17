@@ -9,6 +9,7 @@ README.md と docs/decisions/0001-implementation-language.md を読んでから�
 - 検証は mise run check と mise run test:race を実行する。
 - 依存変更では mise run security:check も実行する。
 - push 前に git diff --check と最終差分を確認する。
+- AI が実装した PR の本文は `guidance/core/ai-disclosure.md` に従い、先頭に明示文を記載する。
 
 ## 通常開発と自律保守
 
