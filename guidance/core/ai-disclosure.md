@@ -30,7 +30,7 @@ AI の実装関与がある PR をエージェントが再編集するときは�
 rulesync 利用先では `.rulesync/rules/dev-standards.md` の共通入口から参照する。
 利用する各エージェントの rules 出力を rulesync の設定で有効にし、適用後に `rulesync generate` で再生成する。
 入口が生成され、共通ルールを読む指示が各エージェントに届いていることを確認する。
-rulesync を使わない利用先の入口は `AGENTS.md` である。
+rulesync を使わない利用先は `AGENTS.md` を入口にする。
 これを自動で読まないエージェントには、利用先で rulesync の rules 出力か既存の指示から参照を追加する。
 既存利用先には、採用版の更新計画を確認・適用し、再生成してから届く。
 
