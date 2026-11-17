@@ -9,10 +9,20 @@ import (
 )
 
 func TestSharedGuidanceDeliveryRollbackAndConflict(t *testing.T) {
-	for _, instructions := range []string{"", "rulesync"} {
-		t.Run(instructions, func(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		instructions string
+		automation   bool
+		language     string
+	}{
+		{"direct", "", true, ""},
+		{"rulesync", "rulesync", true, ""},
+		{"rulesync-only", "rulesync", false, ""},
+		{"rulesync-english", "rulesync", true, "en"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			tree := fixture(t)
-			p, err := tree.Plan(Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md", Automation: true, Instructions: instructions})
+			p, err := tree.Plan(Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md", Automation: tc.automation, Instructions: tc.instructions, InstructionLanguage: tc.language})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -41,14 +51,17 @@ func TestSharedGuidanceDeliveryRollbackAndConflict(t *testing.T) {
 			if strings.Count(shared, ":robot: これは AI で書かれています。") != 1 || !strings.Contains(shared, "## PROCESS-AI-DISCLOSURE") {
 				t.Fatal("AI の実装関与を明示する共通ルールが配布されていない")
 			}
-			if instructions == "rulesync" {
+			if tc.instructions == "rulesync" {
 				entry := read(t, tree.Root, rulesyncEntryPath)
 				if !strings.Contains(entry, `targets: ["*"]`) || !strings.Contains(entry, "`.standards/rules.md`") {
 					t.Fatal("全エージェント向けの共通ルール参照がない")
 				}
 				var m Manifest
-				m.AI.Targets = []string{"codex"}
-				m.AI.Instructions = instructions
+				if tc.automation {
+					m.AI.Targets = []string{"codexcli"}
+				}
+				m.AI.Instructions = tc.instructions
+				m.AI.Language = tc.language
 				write(t, tree.Root, "AGENTS.md", instructionsEntry(m))
 			}
 			again, err := tree.Plan(Request{Mode: "reapply"})
@@ -77,11 +90,11 @@ func TestSharedGuidanceUpgradeFromPreviousGuidance(t *testing.T) {
 			path := ".standards/rules.md"
 			shared := read(t, tree.Root, path)
 			before, removed, ok := strings.Cut(shared, "\n## "+rule+"\n")
-			if _, after, found := strings.Cut(removed, "\n## "); found {
-				before += "\n## " + after
-			}
 			if !ok {
 				t.Fatal("更新元に対象の共通ルールがない")
+			}
+			if _, after, found := strings.Cut(removed, "\n## "); found {
+				before += "\n## " + after
 			}
 			write(t, tree.Root, path, before)
 			var lock Lock
