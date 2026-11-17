@@ -35,6 +35,15 @@ Issue には受入条件、日時、検証結果、残条件を残し、Project 
 設定と初回確認は [横断プロジェクト管理](docs/project-management.md) を参照してください。
 GitHub への更新は Codex が行い、`check` と `verify` は更新済みとは判定せず `review_required` と報告します。
 
+## AI が実装した PR の明示
+
+AI が実装に関与した PR の本文は、1行目を `:robot: これは AI で書かれています。` とします。
+作成・更新時に重複を避けて既存本文を保持し、保存された本文を読み直して確認します。
+[共通ルール](guidance/core/ai-disclosure.md) は `.standards/rules.md` に配布し、
+rulesync 利用先では共通入口を各エージェントの rules 出力へ生成して参照させます。
+エージェント固有の hooks による自動挿入は行わず、`check` は遵守を `review_required` と報告します。
+既存利用先への反映には、採用版の更新・適用と rulesync の再生成が必要です。
+
 ## 旧委譲ルールの移行
 
 旧版で配布していた `.claude/rules/dev-standards-agent-harness.md` は廃止しました。

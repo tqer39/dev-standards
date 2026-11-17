@@ -176,7 +176,7 @@ func Catalog() ([]Rule, error) {
 			switch c.Handler {
 			case "editorconfig", "gitignore", "mise", "bootstrap", "lint", "format", "language":
 			// 生成物の一致では判定できないルール。builtin にすると check が pass と報告してしまう。
-			case "actions-security", "ci-speed", "renovate-grouping", "project-tracking":
+			case "actions-security", "ci-speed", "renovate-grouping", "project-tracking", "ai-disclosure":
 				wantType = "review"
 			default:
 				return fmt.Errorf("unknown handler: %s", c.Handler)
