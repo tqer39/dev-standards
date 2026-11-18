@@ -51,6 +51,9 @@ func TestSharedGuidanceDeliveryRollbackAndConflict(t *testing.T) {
 			if strings.Count(shared, ":robot: これは AI で書かれています。") != 1 || !strings.Contains(shared, "## PROCESS-AI-DISCLOSURE") {
 				t.Fatal("AI の実装関与を明示する共通ルールが配布されていない")
 			}
+			if !strings.Contains(shared, "## PROCESS-JAPANESE-WRITING") || !strings.Contains(shared, "#### 導入と検証") {
+				t.Fatal("日本語の出力に関する共通ルールが配布されていない")
+			}
 			if tc.instructions == "rulesync" {
 				entry := read(t, tree.Root, rulesyncEntryPath)
 				if !strings.Contains(entry, `targets: ["*"]`) || !strings.Contains(entry, "`.standards/rules.md`") {
@@ -84,7 +87,7 @@ func TestSharedGuidanceDeliveryRollbackAndConflict(t *testing.T) {
 }
 
 func TestSharedGuidanceUpgradeFromPreviousGuidance(t *testing.T) {
-	for _, rule := range []string{"PROCESS-PROJECT-TRACKING", "PROCESS-AI-DISCLOSURE"} {
+	for _, rule := range []string{"PROCESS-PROJECT-TRACKING", "PROCESS-AI-DISCLOSURE", "PROCESS-JAPANESE-WRITING"} {
 		t.Run(rule, func(t *testing.T) {
 			tree := adoptWithAutomation(t)
 			path := ".standards/rules.md"

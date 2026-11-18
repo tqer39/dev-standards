@@ -44,6 +44,17 @@ rulesync 利用先では共通入口を各エージェントの rules 出力へ�
 エージェント固有の hooks による自動挿入は行わず、`check` は遵守を `review_required` と報告します。
 既存利用先への反映には、採用版の更新・適用と rulesync の再生成が必要です。
 
+## 日本語の文章と出力
+
+日本語の文書・出力を作成・編集する利用先では、textlint・cspell・yomiyasu を導入する
+[共通ルール](guidance/core/japanese-writing.md)を配布します。
+textlint は文章規則、cspell は英単語や技術用語の綴り、yomiyasu は読みやすさの推敲を担当します。
+会話、コミットメッセージ、PR 本文にも同じ方針を適用します。
+自律保守または rulesync の共通入口を導入した利用先へ `.standards/rules.md` として届きます。
+ツール・スキルの導入と既存 lint・CI への接続は利用先で行い、既存設定と辞書を保持します。
+`check` と `verify` は導入や推敲の完了を自動判定せず、`review_required` と報告します。
+既存利用先への配布には採用版の更新計画と適用が必要です。
+
 ## 旧委譲ルールの移行
 
 旧版で配布していた `.claude/rules/dev-standards-agent-harness.md` は廃止しました。

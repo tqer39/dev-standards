@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "PROCESS-JAPANESE-WRITING",
+  "revision": 1,
+  "status": "active",
+  "title": "日本語の出力に textlint・cspell・yomiyasu を導入する",
+  "rationale": "日本語の文章規則、綴り、読みやすさを継続して確認し、出力の品質を保つ。",
+  "appliesTo": {"profiles": ["base"]},
+  "phases": ["adopt", "pr", "scheduled", "release"],
+  "enforcement": {"level": "warning", "waivable": false},
+  "checks": [
+    {"id": "review", "type": "review", "handler": "japanese-writing", "parameters": {}}
+  ],
+  "remediation": {
+    "mode": "assisted",
+    "handler": "japanese-writing",
+    "instructions": "日本語の文書や出力を作成・編集する利用先で、既存設定を保持して textlint・cspell・yomiyasu を導入する。実行範囲と未検証の出力を区別する。"
+  },
+  "guidance": "guidance/core/japanese-writing.md",
+  "references": [
+    "https://github.com/textlint/textlint",
+    "https://cspell.org/docs/configuration/",
+    "https://github.com/nanaism/yomiyasu"
+  ]
+}
