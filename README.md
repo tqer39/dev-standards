@@ -18,7 +18,7 @@ macOS、Linux、Windows で同じ CLI と mise タスクを使用します。
 - 変更計画、ロック、適用済み状態、衝突検出、通常の書き込み失敗時の復元
 - YAML と JSON Schema によるルール・宣言・プロファイル・例外の検証
 
-既存の Codex ログインを使う自律保守、固定 hooks、通常開発の検証記録、
+既存の Codex または Claude Code のログインを使う自律保守、固定 hooks、通常開発の検証記録、
 更新 PR の自動検証・マージ、版の更新と利用先への移行にも対応します。
 初回設定と運用条件は [自律保守](docs/autonomous-maintenance.md) を参照してください。
 
@@ -27,13 +27,33 @@ dev-standards 自身による rulesync を使ったその他の LLM への配布
 言語別の検証を自動構成する複数言語のモノレポ対応は後続の実装です。
 Node.js/npm を主コンポーネントとし、既存タスクで検証する Go/Swift パッケージを明示的に併設できます。
 
+## Claude Code への対応
+
+`.standards/repository.yml` の `ai.targets` で、hooks と共通指示を配置するエージェントを選びます。
+`codexcli` と `claudecode` を指定でき、両方を並べることもできます。省略時は従来どおり `codexcli` です。
+
+| ターゲット | 配置するファイル |
+| --- | --- |
+| `codexcli` | `AGENTS.md`、`.codex/hooks.json` |
+| `claudecode` | `AGENTS.md`、`CLAUDE.md`、`.claude/settings.json` の hooks |
+
+`CLAUDE.md` と `.claude/settings.json` の既存の内容は、`.standards/claude.local.md` と
+`.standards/claude-settings.local.json` に正本として保存して合成します。hooks 以外の設定も保持します。
+rulesync を使う利用先では、`CLAUDE.md` を rulesync の出力として扱い、dev-standards は管理しません。
+共通の入口は rulesync のルールとして Claude Code にも届きます。
+
+新しい利用先では `onboard` に `--ai-targets claudecode` を追加します。
+既存の利用先では `ai.targets` を書き換え、`dev-standards plan` と `apply` で再生成します。
+ターゲットから外したエージェントのファイルは、導入前の内容に戻すか、元がなければ削除します。
+自律保守のエージェントの切り替えは [自律保守](docs/autonomous-maintenance.md) を参照してください。
+
 ## Issue と横断 Projects による進捗管理
 
-Codex が作業開始・進捗・終了時に Issue と横断 Project を更新する手順を共通ルールとして配布します。
+主担当のエージェントが作業開始・進捗・終了時に Issue と横断 Project を更新する手順を共通ルールとして配布します。
 自律保守または rulesync の共通指示の入口を導入した利用先に、`.standards/rules.md` として届きます。
 Issue には受入条件、日時、検証結果、残条件を残し、Project の Status と日付で全体を確認します。
 設定と初回確認は [横断プロジェクト管理](docs/project-management.md) を参照してください。
-GitHub への更新は Codex が行い、`check` と `verify` は更新済みとは判定せず `review_required` と報告します。
+GitHub への更新はエージェントが行い、`check` と `verify` は更新済みとは判定せず `review_required` と報告します。
 
 ## AI が実装した PR の明示
 

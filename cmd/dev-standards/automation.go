@@ -27,6 +27,8 @@ func automationCommand(command string, args []string, out, errOut io.Writer) err
 	companionsPath := flags.String("companions", "", "Go/Swift のパスと検証タスクを記した JSON")
 	componentPath := flags.String("component-path", "", "単一コンポーネントの相対ディレクトリ")
 	decision := flags.String("decision", "", "言語選定記録")
+	aiTargets := flags.String("ai-targets", "", "hooks と指示を配置するエージェント: codexcli、claudecode のカンマ区切り（既定は codexcli）")
+	agent := flags.String("agent", "", "host-init で台帳に記録する保守エージェント: codex（既定）または claude")
 	rule := flags.String("rule", "observation", "問題に関係するルール")
 	message := flags.String("message", "", "共通の問題の観測内容")
 	if err := flags.Parse(args); err != nil {
@@ -60,6 +62,7 @@ func automationCommand(command string, args []string, out, errOut io.Writer) err
 			return err
 		}
 		c := automation.Default(automation.Entry{Path: root, Remote: strings.TrimSpace(string(remote)), Branch: "main", Role: "source"})
+		c.Agent = *agent
 		if err = automation.Save(name, c); err != nil {
 			return err
 		}
@@ -201,6 +204,9 @@ func automationCommand(command string, args []string, out, errOut io.Writer) err
 				return fmt.Errorf("initial onboarding is required")
 			}
 			req = engine.Request{Mode: "adopt", Profile: *profile, ComponentPath: *componentPath, DecisionPath: *decision, Instructions: *instructions, CompanionsPath: *companionsPath, InstructionLanguage: *instructionLanguage, Automation: true}
+			if *aiTargets != "" {
+				req.AITargets = strings.Split(*aiTargets, ",")
+			}
 		}
 		plan, err := tree.Plan(req)
 		if err != nil {

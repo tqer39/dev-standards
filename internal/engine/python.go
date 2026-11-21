@@ -148,9 +148,9 @@ func componentWorkflow(m Manifest, project string) string {
 			}
 		}
 	}
-	if m.AI.Instructions == "rulesync" {
-		workflow = strings.Replace(workflow, "'.standards/tasks.standards.toml', 'AGENTS.md',", "'.standards/tasks.standards.toml', '"+rulesyncEntryPath+"',", 1)
-	}
+	// The template lists the codexcli delivery set; the CI must match the actual ownership.
+	quoted := func(paths []string) string { return "'" + strings.Join(paths, "', '") + "'" }
+	workflow = strings.Replace(workflow, quoted(automationPaths), quoted(automationPathsFor(m)), 1)
 	if m.Components[0].Profile == "go" {
 		return workflow
 	}

@@ -7,8 +7,33 @@ import (
 	"strings"
 )
 
-var automationPaths = []string{"AGENTS.md", ".codex/hooks.json", ".standards/rules.md", ".github/workflows/dev-standards.yml", versionLagWorkflowPath}
-var automationInputs = []string{"AGENTS.md", ".codex/hooks.json", ".standards/agents.local.md", ".standards/hooks.local.json", ".standards/rules.md", ".github/workflows/dev-standards.yml", versionLagWorkflowPath, rulesyncEntryPath}
+// automationPaths is the delivery set of the default codexcli target.
+var automationPaths = []string{"AGENTS.md", codexHooksPath, ".standards/rules.md", ".github/workflows/dev-standards.yml", versionLagWorkflowPath}
+var automationInputs = []string{"AGENTS.md", codexHooksPath, ".standards/agents.local.md", ".standards/hooks.local.json", claudeInstructionsSource, claudeSettingsSource, ".standards/rules.md", ".github/workflows/dev-standards.yml", versionLagWorkflowPath, rulesyncEntryPath}
+
+const (
+	codexHooksPath           = ".codex/hooks.json"
+	claudeInstructionsPath   = "CLAUDE.md"
+	claudeInstructionsSource = ".standards/claude.local.md"
+	claudeSettingsPath       = ".claude/settings.json"
+	claudeSettingsSource     = ".standards/claude-settings.local.json"
+)
+
+// targetOutputs maps each agent-specific output to the source captured from its
+// pre-adoption content. When a target is removed, the source is restored there.
+var targetOutputs = map[string]string{
+	codexHooksPath:         ".standards/hooks.local.json",
+	claudeInstructionsPath: claudeInstructionsSource,
+	claudeSettingsPath:     claudeSettingsSource,
+}
+
+// claudeInputs are read only for the claudecode target, so an unrelated
+// CLAUDE.md symlink in other repositories does not block planning.
+var claudeInputs = []string{claudeInstructionsPath, claudeSettingsPath}
+
+var supportedTargets = []string{"codexcli", "claudecode"}
+
+const hookCommand = "\"$(git rev-parse --show-toplevel)/.standards/cache/dev-standards\" hook"
 
 // With rulesync, AGENTS.md stays a rulesync output and the shared entry is
 // delivered as a rulesync rule instead.
@@ -36,12 +61,101 @@ func automationPathsFor(m Manifest) []string {
 		}
 		return nil
 	}
-	if m.AI.Instructions != "rulesync" {
-		return automationPaths
+	paths := []string{"AGENTS.md"}
+	if m.AI.Instructions == "rulesync" {
+		paths[0] = rulesyncEntryPath
 	}
-	paths := append([]string{}, automationPaths...)
-	paths[0] = rulesyncEntryPath
-	return paths
+	claude := contains(m.AI.Targets, "claudecode")
+	if claude && m.AI.Instructions != "rulesync" {
+		// rulesync delivers the shared entry to Claude Code through its own rules.
+		paths = append(paths, claudeInstructionsPath)
+	}
+	if contains(m.AI.Targets, "codexcli") {
+		paths = append(paths, codexHooksPath)
+	}
+	if claude {
+		paths = append(paths, claudeSettingsPath)
+	}
+	return append(paths, ".standards/rules.md", ".github/workflows/dev-standards.yml", versionLagWorkflowPath)
+}
+
+// instructionFile composes a managed instruction file from the content it had
+// before adoption and the shared entry.
+func instructionFile(p *Plan, desired map[string]Snapshot, previous State, m Manifest, target, source string) error {
+	local := p.Inputs[source]
+	if !local.Exists {
+		local = file(normalized(p.Inputs[target].Content))
+		if _, owned := previous.Files[target]; owned {
+			return fmt.Errorf("%s source missing", strings.TrimSuffix(target, ".md"))
+		}
+		desired[source] = local
+	}
+	entry := instructionsEntry(m)
+	if strings.TrimSpace(local.Content) != "" {
+		entry = strings.Replace(entry, "# 共通開発ルール", "## 共通開発ルール", 1)
+	}
+	desired[target] = file(strings.TrimRight(normalized(local.Content), "\n") + "\n\n" + entry)
+	return nil
+}
+
+// hookFile adds the fixed dev-standards hooks to the agent's own hook settings
+// and keeps every other setting from the captured source.
+func hookFile(p *Plan, desired map[string]Snapshot, previous State, target, source string, hook map[string]any) error {
+	settings := map[string]any{}
+	raw := p.Inputs[source]
+	if !raw.Exists {
+		raw = file(p.Inputs[target].Content)
+		if _, owned := previous.Files[target]; owned {
+			return fmt.Errorf("hook source missing")
+		}
+		if raw.Content == "" {
+			raw.Content = "{}\n"
+		}
+		desired[source] = raw
+	}
+	if err := json.Unmarshal([]byte(raw.Content), &settings); err != nil {
+		return fmt.Errorf("hook source: %w", err)
+	}
+	events, ok := settings["hooks"].(map[string]any)
+	if !ok {
+		if _, exists := settings["hooks"]; exists {
+			return fmt.Errorf("hooks must be an object")
+		}
+		events = map[string]any{}
+	}
+	for _, event := range []string{"SessionStart", "UserPromptSubmit", "Stop"} {
+		group := map[string]any{"hooks": []any{hook}}
+		old, exists := events[event]
+		if exists {
+			groups, ok := old.([]any)
+			if !ok {
+				return fmt.Errorf("hook event must be an array")
+			}
+			events[event] = append(groups, group)
+		} else {
+			events[event] = []any{group}
+		}
+	}
+	settings["hooks"] = events
+	desired[target] = file(string(JSON(settings)))
+	return nil
+}
+
+// releaseRemovedTargets gives back the outputs of targets no longer listed:
+// the captured source is restored when it has content, otherwise the file is removed.
+func releaseRemovedTargets(p *Plan, desired map[string]Snapshot, previous State, m Manifest) {
+	current := automationPathsFor(m)
+	for target, source := range targetOutputs {
+		if _, owned := previous.Files[target]; !owned || contains(current, target) {
+			continue
+		}
+		local := strings.TrimSpace(p.Inputs[source].Content)
+		if local == "" || local == "{}" {
+			desired[target] = Snapshot{}
+		} else {
+			desired[target] = file(p.Inputs[source].Content)
+		}
+	}
 }
 
 func contains(xs []string, s string) bool {
@@ -67,61 +181,34 @@ func (t *Tree) automationFiles(p *Plan, desired map[string]Snapshot, m Manifest)
 		}
 		desired[rulesyncEntryPath] = file("---\nroot: false\ntargets: [\"*\"]\ndescription: dev-standards の共通開発ルールの入口\nglobs: [\"**/*\"]\n---\n\n" + instructionsEntry(m))
 	} else {
-		local := p.Inputs[".standards/agents.local.md"]
-		if !local.Exists {
-			local = file(normalized(p.Inputs["AGENTS.md"].Content))
-			if _, owned := previous.Files["AGENTS.md"]; owned {
-				return fmt.Errorf("AGENTS source missing")
+		if err := instructionFile(p, desired, previous, m, "AGENTS.md", ".standards/agents.local.md"); err != nil {
+			return err
+		}
+		if contains(m.AI.Targets, "claudecode") {
+			// Claude Code reads CLAUDE.md, not AGENTS.md.
+			if err := instructionFile(p, desired, previous, m, claudeInstructionsPath, claudeInstructionsSource); err != nil {
+				return err
 			}
-			desired[".standards/agents.local.md"] = local
 		}
-		entry := instructionsEntry(m)
-		if strings.TrimSpace(local.Content) != "" {
-			entry = strings.Replace(entry, "# 共通開発ルール", "## 共通開発ルール", 1)
-		}
-		desired["AGENTS.md"] = file(strings.TrimRight(normalized(local.Content), "\n") + "\n\n" + entry)
 	}
 	desired[".standards/rules.md"] = file("# 共通ルール\n\nEditorConfig、gitignore.io の採用入力、mise の作業入口を維持する。\n要件・言語選定記録を参照し、変更に対応した静的解析、整形、テストを実行する。\n生成物は直接編集せず `.standards` の正本を編集して再適用する。\n実行していない検査を成功と報告しない。\n更新は検証済みの版を採用し、作業中の入力と無関係な変更を保持する。\nルールの重複・矛盾・古い判断は根拠とともに保守へ記録する。\n")
 	if len(m.AI.Targets) == 0 {
 		return t.appendRuleGuidance(desired)
 	}
-	hooks := map[string]any{}
-	raw := p.Inputs[".standards/hooks.local.json"]
-	if !raw.Exists {
-		raw = file(p.Inputs[".codex/hooks.json"].Content)
-		if _, owned := previous.Files[".codex/hooks.json"]; owned {
-			return fmt.Errorf("hook source missing")
-		}
-		if raw.Content == "" {
-			raw.Content = "{}\n"
-		}
-		desired[".standards/hooks.local.json"] = raw
-	}
-	if err := json.Unmarshal([]byte(raw.Content), &hooks); err != nil {
-		return fmt.Errorf("hook source: %w", err)
-	}
-	events, ok := hooks["hooks"].(map[string]any)
-	if !ok {
-		if _, exists := hooks["hooks"]; exists {
-			return fmt.Errorf("hooks must be an object")
-		}
-		events = map[string]any{}
-	}
-	for _, event := range []string{"SessionStart", "UserPromptSubmit", "Stop"} {
-		group := map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "\"$(git rev-parse --show-toplevel)/.standards/cache/dev-standards\" hook", "commandWindows": "powershell -NoProfile -Command \"& ((git rev-parse --show-toplevel) + '/.standards/cache/dev-standards.exe') hook\"", "timeout": 30}}}
-		old, exists := events[event]
-		if exists {
-			groups, ok := old.([]any)
-			if !ok {
-				return fmt.Errorf("hook event must be an array")
-			}
-			events[event] = append(groups, group)
-		} else {
-			events[event] = []any{group}
+	if contains(m.AI.Targets, "codexcli") {
+		hook := map[string]any{"type": "command", "command": hookCommand, "commandWindows": "powershell -NoProfile -Command \"& ((git rev-parse --show-toplevel) + '/.standards/cache/dev-standards.exe') hook\"", "timeout": 30}
+		if err := hookFile(p, desired, previous, codexHooksPath, ".standards/hooks.local.json", hook); err != nil {
+			return err
 		}
 	}
-	hooks["hooks"] = events
-	desired[".codex/hooks.json"] = file(string(JSON(hooks)))
+	if contains(m.AI.Targets, "claudecode") {
+		// Claude Code runs hooks through Git Bash on Windows, which resolves the .exe.
+		hook := map[string]any{"type": "command", "command": hookCommand, "timeout": 30}
+		if err := hookFile(p, desired, previous, claudeSettingsPath, claudeSettingsSource, hook); err != nil {
+			return err
+		}
+	}
+	releaseRemovedTargets(p, desired, previous, m)
 	if err := t.appendRuleGuidance(desired); err != nil {
 		return err
 	}

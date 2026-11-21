@@ -24,9 +24,11 @@ type Config struct {
 	MaxFiles       int     `json:"maxFiles"`
 	MaxLines       int     `json:"maxLines"`
 	MaxAttempts    int     `json:"maxAttempts"`
+	// Agent selects the maintenance LLM CLI; empty keeps codex for existing fleets.
+	Agent string `json:"agent,omitempty"`
 }
 
-func Default(source Entry) Config { return Config{1, source, []Entry{}, 1800, 32, 1200, 2} }
+func Default(source Entry) Config { return Config{1, source, []Entry{}, 1800, 32, 1200, 2, ""} }
 func Load(name string) (Config, error) {
 	var c Config
 	f, err := os.Open(name)
@@ -51,6 +53,9 @@ func Load(name string) (Config, error) {
 func (c Config) Validate() error {
 	if c.SchemaVersion != 1 || c.TimeoutSeconds < 30 || c.TimeoutSeconds > 3600 || c.MaxFiles < 1 || c.MaxFiles > 100 || c.MaxLines < 1 || c.MaxLines > 5000 || c.MaxAttempts < 1 || c.MaxAttempts > 3 {
 		return fmt.Errorf("invalid maintenance limits")
+	}
+	if c.Agent != "" && c.Agent != "codex" && c.Agent != "claude" {
+		return fmt.Errorf("agent must be codex or claude")
 	}
 	entries := append([]Entry{c.Source}, c.Projects...)
 	seen := map[string]bool{}
