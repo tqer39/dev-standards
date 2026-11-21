@@ -81,6 +81,12 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		m.Gitignore.Templates[0] = profileLanguage(req.Profile)
 		m.AI.Instructions = req.Instructions
 		m.AI.Language = req.InstructionLanguage
+		if len(req.AITargets) > 0 {
+			if !req.Automation {
+				return nil, fmt.Errorf("AI targets require onboarding with automation")
+			}
+			m.AI.Targets = append([]string{}, req.AITargets...)
+		}
 		if req.CompanionsPath != "" {
 			if err := bundle.Decode([]byte(p.Inputs[req.CompanionsPath].Content), "companions", &m.Companions); err != nil {
 				return nil, err
@@ -92,7 +98,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 			}
 		}
 	} else {
-		if req.Profile != "" || req.DecisionPath != "" || req.ComponentPath != "" || req.Instructions != "" || req.CompanionsPath != "" || req.InstructionLanguage != "" {
+		if req.Profile != "" || req.DecisionPath != "" || req.ComponentPath != "" || req.Instructions != "" || req.CompanionsPath != "" || req.InstructionLanguage != "" || len(req.AITargets) > 0 {
 			return nil, fmt.Errorf("reapply does not accept adoption options")
 		}
 		if err := bundle.Decode([]byte(p.Inputs[".standards/repository.yml"].Content), "repository", &m); err != nil {
@@ -112,14 +118,21 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		m.Standard.Version = bundle.Version
 	}
 	if req.Automation {
-		m.AI.Targets = []string{"codexcli"}
+		// Keep targets chosen at onboarding or edited in repository.yml.
+		if len(m.AI.Targets) == 0 {
+			m.AI.Targets = []string{"codexcli"}
+		}
 		m.Update.Rollout = "standard"
 	}
 	managedPaths := append([]string{}, managedPaths...)
 	if len(automationPathsFor(m)) > 0 {
 		managedPaths = append(managedPaths, automationPathsFor(m)...)
 	}
-	for _, name := range automationInputs {
+	inputs := automationInputs
+	if contains(m.AI.Targets, "claudecode") {
+		inputs = append(append([]string{}, inputs...), claudeInputs...)
+	}
+	for _, name := range inputs {
 		if _, err := read(name); err != nil {
 			return nil, err
 		}
@@ -341,6 +354,14 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		attrs.Content += "/" + rulesyncEntryPath + " text eol=lf\n"
 		desired[".gitattributes"] = attrs
 	}
+	if contains(m.AI.Targets, "claudecode") {
+		attrs := desired[".gitattributes"]
+		if m.AI.Instructions != "rulesync" {
+			attrs.Content += "/" + claudeInstructionsPath + " text eol=lf\n"
+		}
+		attrs.Content += "/" + claudeSettingsPath + " text eol=lf\n"
+		desired[".gitattributes"] = attrs
+	}
 	desired["mise.toml"] = file(rootMise)
 	if err := t.claudeFiles(p, desired); err != nil {
 		return nil, err
@@ -360,6 +381,10 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	}
 	if len(automationPathsFor(m)) > 0 {
 		required = append(required, automationPathsFor(m)...)
+	}
+	if contains(m.AI.Targets, "claudecode") {
+		// Without the sources, a fresh clone cannot reapply the merged Claude files.
+		required = append(required, claudeInstructionsSource, claudeSettingsSource)
 	}
 	if err := validateIgnore(desired[".gitignore"].Content, required...); err != nil {
 		return nil, err
@@ -383,6 +408,10 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		requiredOwnership = append(requiredOwnership, previousDeliveryPaths...)
 		for _, name := range requiredOwnership {
 			if _, ok := state.Files[name]; !ok {
+				// A target added in repository.yml starts owning its outputs now.
+				if _, optional := targetOutputs[name]; optional {
+					continue
+				}
 				// Earlier versions never owned this file; the upgrade adds it.
 				// The digest can't tell them apart: it ignores CLI-only releases.
 				if name == versionLagWorkflowPath && previousLock.Version != bundle.Version {
@@ -392,7 +421,8 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 			}
 		}
 		for name, baseline := range state.Files {
-			if !contains(managedPaths, name) && name != claudeRulePath {
+			_, removedTarget := targetOutputs[name]
+			if !contains(managedPaths, name) && name != claudeRulePath && !removedTarget {
 				return nil, fmt.Errorf("unknown managed path in previous state: %s", name)
 			}
 			ok := baseline.Exists

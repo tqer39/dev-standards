@@ -1,7 +1,7 @@
 # 初回導入後の自律保守
 
 初回設定で対象、権限、予算を固定し、以後の通常のルール保守は人間の指示・承認を待たず進める。
-LLM の起動には保存済みの ChatGPT ログインを使い、OpenAI API キーを追加しない。
+LLM の起動には保存済みのサブスクリプションのログイン（Codex は ChatGPT、Claude Code は claude.ai）を使い、API キーを追加しない。
 利用先は、ルートに Go module が１つ、または指定ディレクトリに Python/uv か Node.js/npm のパッケージが１つあるリポジトリである。
 
 ## 実行の分担
@@ -15,10 +15,12 @@ LLM の起動には保存済みの ChatGPT ログインを使い、OpenAI API �
 | 週次の遅れ検知 | タグを付けた版が利用先に届いていないことを、資格情報なしで知らせる |
 | ローカルの定期保守 | 共通ルールの改善、検証、自動マージ、利用先への反映を担当する |
 
-hooks は `.codex/hooks.json` に固定し、ルール更新ごとに書き換えない。
+hooks は `ai.targets` に応じて `.codex/hooks.json` か `.claude/settings.json` に固定し、ルール更新ごとに書き換えない。
 Codex の仕様上、初回にはプロジェクトと hook 定義の信頼設定が必要である。
-hooks が利用できない環境でも AGENTS.md と CI、定期保守が機能する。
-保守用の Codex 子プロセスでは hooks を無効にして、保守の再帰起動を防ぐ。
+Claude Code ではワークスペースの信頼を確認した後に、プロジェクト設定の hooks が有効になる。
+Windows の Claude Code は hooks を Git Bash で実行するため、Unix と同じコマンドを使う。
+hooks が利用できない環境でも AGENTS.md・CLAUDE.md と CI、定期保守が機能する。
+保守用の LLM 子プロセスでは hooks を無効にして、保守の再帰起動を防ぐ。
 
 ## 初回のホスト設定
 
@@ -31,11 +33,15 @@ codex login status
 bin/dev-standards host-init --fleet .local/maintenance/fleet.json
 ```
 
+Claude Code で保守する場合は、`claude auth status` で claude.ai のログインを確認し、
+`host-init` に `--agent claude` を追加する。既存の台帳では `"agent": "claude"` を追記する。
+`agent` を省略した台帳は従来どおり Codex を使う。
+
 Windows の実行ファイル名は `bin/dev-standards.exe`。
 チェック用の npm ツールは mise の `npm.package_manager = "npm"` でインストールし、OS 間で依存関係の配置方法を揃える。
 `host-init` はリポジトリの origin を保守元として記録し、キャッシュに固定した起動口を配置する。
 台帳を既に作成している場合は上書きしない。
-ChatGPT ログインの認証情報はコピーせず、Codex 自身の保存済み認証を利用する。
+ログインの認証情報はコピーせず、各 CLI 自身の保存済み認証を利用する。
 
 台帳はホスト専用の非公開データであり、Git に追加しない。
 初期値は１回の実行1,800秒、変更32ファイル、提案ファイルの合計1,200行、修復２回まで。
@@ -51,7 +57,7 @@ dev-standards onboard --repo /path/to/project --decision decision.md --fleet /pa
 ```
 
 Python/uv では `--profile python-uv --component-path session-indexer` を追加する。
-Node.js/npm では `--profile node-npm` を追加する。Go/Swift を併設する場合は README の宣言を作り、
+Node.js/npm では `--profile node-npm` を追加する。Claude Code に hooks と指示を配置する場合は `--ai-targets claudecode` を追加する（両方なら `codexcli,claudecode`）。Go/Swift を併設する場合は README の宣言を作り、
 `--companions companions.json` を追加する。英語の共通指示には `--instruction-language en` を使う。AGENTS.md を rulesync で生成している場合は
 `--instructions rulesync` も追加し、適用後に `rulesync generate` で AGENTS.md を再生成する。
 既存の予約タスクは先に移行し、Python と uv は完全な版番号で固定する。
@@ -66,6 +72,18 @@ Node.js/npm では `--profile node-npm` を追加する。Go/Swift を併設す�
 最初の登録先を先行適用対象にする。
 初回に対応できない構成や衝突があれば、その時点で理由を示し、既存の設定を破棄しない。
 初回設定後の利用先は台帳から発見されるため、普段の機能開発で保守を指示する必要はない。
+
+### Claude Code での保守エージェント
+
+`claude -p` を構造化出力（`--json-schema`）で起動し、Codex のサンドボックスに相当する制限を引数で固定する。
+
+- `--setting-sources ""` と `--strict-mcp-config` で、ユーザー・プロジェクトの設定と MCP を読まない
+- `--settings '{"disableAllHooks":true}'` で hooks を無効にする
+- シェルを渡さない。Git の `--output` などのオプションはファイルを書けるため、レビューの差分はホストが `git diff HEAD` と未追跡ファイルの一覧を取得してプロンプトに渡す
+- 見直しは読み取りと編集だけを許可し、`acceptEdits` で書き込みを checkout 内に限る
+- レビューは読み取りだけを許可し、`dontAsk` で他のツールを確認なしで拒否する
+
+Claude Code はサブスクリプションの利用枠を開発と共有するため、利用枠の不足は認証失効と同じく失敗として記録する。
 
 ## 通常開発の確認
 
@@ -138,18 +156,18 @@ bin/dev-standards maintain --fleet .local/maintenance/fleet.json
 ```
 
 このコマンドを、既存ログインを使うローカルの定期タスクから呼び出す。
-このチャットでは Codex アプリの定期実行を接続する。
+Codex アプリの定期実行、または Claude Code のローカルの定期タスクから接続する。
 PC が停止している間は実行できないため、再び利用可能になった実行で保守を進める。
 台帳内の対象を処理するので、リポジトリごとの定期タスクは不要。
 
 処理は次の順で進む。
 
-1. 保存済みの ChatGPT ログインと、台帳の権限・予算を確認する。
+1. 台帳で選んだエージェントの保存済みログインと、台帳の権限・予算を確認する。
 2. 別の checkout で共通基盤を取得する。
-3. 週１回、または新しい観測がある場合に、Codex が共通ルールを見直す。
+3. 週１回、または新しい観測がある場合に、保守エージェントが共通ルールを見直す。
 4. 変更範囲と必須条件を機械的に検証する。
 5. 静的解析、テスト、race 検出、脆弱性検査を実行する。
-6. 別の読み取り専用 Codex 実行で、変更内容と根拠をレビューする。
+6. 別の読み取り専用のエージェント実行で、変更内容と根拠をレビューする。
 7. 更新 PR の対象コミットの CI 成功を確認し、人間の承認待ちにせずマージする。
 8. マージ後の CI 成功も確認して版を付け、検証した CLI を保存する。
 9. 先行対象から順に移行し、新規 checkout の bootstrap と宣言済みのルール生成を済ませてから、検証、独立レビュー、自動マージ、マージ後の再確認を行う。
@@ -253,6 +271,7 @@ GitHub API の待ち条件は、対象コミット・workflow・成功状態を�
 
 ```sh
 DEV_STANDARDS_LIVE_TEST=1 go test ./internal/automation -run TestCodexSavedLoginLive -count=1 -v
+DEV_STANDARDS_LIVE_TEST=1 go test ./internal/automation -run TestClaudeSavedLoginLive -count=1 -v
 ```
 
 ローカル台帳の `.local/maintenance/latest.json` に、実行結果、更新コミット、

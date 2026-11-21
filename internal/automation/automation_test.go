@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +60,9 @@ func (f *fakeCodex) Run(ctx context.Context, dir, exe string, args []string, inp
 	if f.PanicProjectVerification && len(args) > 0 && args[0] == "verify" && strings.HasPrefix(filepath.Base(dir), "project-") {
 		panic("simulated project interruption")
 	}
+	if exe == "claude" {
+		return f.claude(dir, args, input)
+	}
 	if exe != "codex" {
 		return f.exec.Run(ctx, dir, exe, args, input)
 	}
@@ -98,6 +102,53 @@ func (f *fakeCodex) Run(ctx context.Context, dir, exe string, args []string, inp
 	}
 	b, _ := json.Marshal(Decision{Approved: !f.Deny, Reason: "独立した設定差分と要件を確認した。"})
 	return "", os.WriteFile(result, b, 0600)
+}
+
+// claude mimics `claude -p --output-format json` and rejects settings that
+// would load user configuration or widen tool permissions.
+func (f *fakeCodex) claude(dir string, args []string, input string) (string, error) {
+	if len(args) > 0 && args[0] == "auth" {
+		return `{"loggedIn":true,"authMethod":"claude.ai"}`, nil
+	}
+	review := false
+	sources, schema := "unset", ""
+	for i, arg := range args {
+		switch arg {
+		case "--dangerously-skip-permissions", "bypassPermissions", "--model":
+			return "", fmt.Errorf("unexpected agent configuration")
+		case "--tools":
+			review = !strings.Contains(args[i+1], "Edit")
+		case "--setting-sources":
+			sources = args[i+1]
+		case "--json-schema":
+			schema = args[i+1]
+		}
+	}
+	mode := "acceptEdits"
+	if review {
+		mode = "dontAsk"
+		if !strings.Contains(input, "git diff HEAD:\n") {
+			return "", fmt.Errorf("review prompt lacks the host diff")
+		}
+	}
+	if sources != "" || schema != resultSchema || !slices.Contains(args, mode) || !slices.Contains(args, `{"disableAllHooks":true}`) || slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "Bash") }) {
+		return "", fmt.Errorf("claude runs without isolation: %v", args)
+	}
+	if review {
+		f.Reviews++
+	} else if f.Changes == 0 {
+		p := filepath.Join(dir, "templates/base/editorconfig.txt")
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return "", err
+		}
+		if err = os.WriteFile(p, append(b, []byte("\n# maintenance acceptance fixture\n")...), 0644); err != nil {
+			return "", err
+		}
+		f.Changes++
+	}
+	b, _ := json.Marshal(map[string]any{"type": "result", "is_error": false, "structured_output": Decision{Approved: !f.Deny, Reason: "独立した設定差分と要件を確認した。"}})
+	return string(b), nil
 }
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -304,6 +355,58 @@ func TestFleetUpdatesSourceAndProjectWithoutHumanApproval(t *testing.T) {
 		t.Fatalf("公開を繰り返さずに起動口更新を回復できません: %+v %v", installed, err)
 	}
 }
+func TestClaudeAgentMaintenanceUsesSavedLoginAndReview(t *testing.T) {
+	root := t.TempDir()
+	source, remote := filepath.Join(root, "source"), filepath.Join(root, "source.git")
+	bare(t, remote)
+	current, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	copySource(t, current, source)
+	repository(t, source, remote)
+	before := runGit(t, source, "rev-parse", "HEAD")
+	c := Default(Entry{Path: source, Remote: remote, Branch: "main", Role: "source"})
+	c.Agent = "claude"
+	fake := &fakeCodex{Deny: true, SkipValidation: true}
+	_, err = (Maintainer{Commands: fake}).Run(context.Background(), c, filepath.Join(root, "state"))
+	if err == nil || !strings.Contains(err.Error(), "independent review rejected") {
+		t.Fatalf("review gate: %v", err)
+	}
+	if fake.Changes != 1 || fake.Reviews != 1 {
+		t.Fatalf("claude proposer and reviewer not both used: changes=%d reviews=%d", fake.Changes, fake.Reviews)
+	}
+	for _, call := range fake.Calls {
+		if call[0] == "codex" {
+			t.Fatalf("codex called with claude agent: %v", call)
+		}
+	}
+	if got := runGit(t, remote, "rev-parse", "refs/heads/main"); got != before {
+		t.Fatal("rejected proposal was published")
+	}
+}
+func TestClaudeLoginRequiresSubscription(t *testing.T) {
+	for _, status := range []string{`{"loggedIn":false,"authMethod":"claude.ai"}`, `{"loggedIn":true,"authMethod":"api_key"}`, `not json`} {
+		x := staticExec(status)
+		if err := CheckLogin(context.Background(), x, "claude", t.TempDir()); err == nil {
+			t.Fatalf("accepted %s", status)
+		}
+	}
+	if err := CheckLogin(context.Background(), staticExec(`{"loggedIn":true,"authMethod":"claude.ai"}`), "claude", t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	c := Default(Entry{Path: t.TempDir(), Remote: "https://github.com/example/source", Branch: "main", Role: "source"})
+	c.Agent = "gemini"
+	if c.Validate() == nil {
+		t.Fatal("unknown maintenance agent accepted")
+	}
+}
+
+type staticExec string
+
+func (s staticExec) Run(context.Context, string, string, []string, string) (string, error) {
+	return string(s), nil
+}
 func TestAgentReviewFailureIsNotPublished(t *testing.T) {
 	root := t.TempDir()
 	source, remote := filepath.Join(root, "source"), filepath.Join(root, "source.git")
@@ -506,7 +609,31 @@ func TestCodexSavedLoginLive(t *testing.T) {
 	if err != nil || !strings.Contains(status, "ChatGPT") {
 		t.Fatalf("saved-login status was not detected: %q %v", status, err)
 	}
-	d, err := Agent(ctx, Exec{}, dir, "保存済み ChatGPT ログインでの無人実行を確認するテストです。ツールは呼ばず、ファイルを変更せず、approved=true、reason=既存ログインでの実行と構造化結果を確認した、として返してください。", true)
+	d, err := Agent(ctx, Exec{}, "", dir, "保存済み ChatGPT ログインでの無人実行を確認するテストです。ツールは呼ばず、ファイルを変更せず、approved=true、reason=既存ログインでの実行と構造化結果を確認した、として返してください。", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Approved {
+		t.Fatal(d.Reason)
+	}
+}
+
+func TestClaudeSavedLoginLive(t *testing.T) {
+	if os.Getenv("DEV_STANDARDS_LIVE_TEST") != "1" {
+		t.Skip("explicit local saved-login smoke test")
+	}
+	dir := t.TempDir()
+	put(t, dir, "README.md", "# 保存済みログインの確認\n")
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial")
+	put(t, dir, "README.md", "# 保存済みログインの確認\n\nレビュー対象の追記。\n")
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	if err := CheckLogin(ctx, Exec{}, "claude", dir); err != nil {
+		t.Fatal(err)
+	}
+	d, err := Agent(ctx, Exec{}, "claude", dir, "保存済み claude.ai ログインでの無人実行を確認するテストです。渡された差分を確認し、ファイルを変更せず、approved=true、reason=既存ログインでの実行と構造化結果を確認した、として返してください。", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -681,7 +808,7 @@ func TestProjectInstructionOwnership(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, name := range []string{"AGENTS.md", ".rulesync/rules/dev-standards.md", ".claude/rules/dev-standards-agent-harness.md", ".claude/rules/dev-standards.md", ".claude/rules/personal.md"} {
+			for _, name := range []string{"AGENTS.md", "CLAUDE.md", ".rulesync/rules/dev-standards.md", ".claude/rules/dev-standards-agent-harness.md", ".claude/rules/dev-standards.md", ".claude/rules/personal.md"} {
 				put(t, dir, name, "candidate instruction\n")
 				want := (name == "AGENTS.md" && mode == "") || (name == ".rulesync/rules/dev-standards.md" && mode == "rulesync")
 				if err := guardProject(dir, []string{name}, Default(Entry{}), cfg); (err == nil) != want {
@@ -712,6 +839,37 @@ func TestProjectInstructionOwnership(t *testing.T) {
 				t.Fatal("unowned Claude rule accepted")
 			}
 		})
+	}
+}
+
+func TestProjectGuardAllowsClaudeCodeOutputs(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	put(t, dir, "go.mod", "module example.com/project\n\ngo 1.27.3\n")
+	put(t, dir, "decision.md", "# 言語選定\n\n## 要件\n\n複数の OS で動作する CLI を開発する。\n\n## 候補\n\nGo と Python を配布方法から比較する。\n\n## 選定理由\n\nGo を採用し単体バイナリを配布する。\n")
+	tree, err := engine.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tree.Close()
+	plan, err := tree.Plan(engine.Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md", Automation: true, AITargets: []string{"claudecode"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := os.ReadFile(filepath.Join(dir, ".git/config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"CLAUDE.md", ".claude/settings.json"} {
+		if err := guardProject(dir, []string{name}, Default(Entry{}), cfg); err != nil {
+			t.Fatalf("%s rejected: %v", name, err)
+		}
+	}
+	if err := guardProject(dir, []string{".claude/settings.local.json"}, Default(Entry{}), cfg); err == nil {
+		t.Fatal("personal Claude settings accepted")
 	}
 }
 

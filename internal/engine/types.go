@@ -72,6 +72,8 @@ type Request struct {
 	Instructions        string `json:"instructions,omitempty"`
 	CompanionsPath      string `json:"companionsPath,omitempty"`
 	InstructionLanguage string `json:"instructionLanguage,omitempty"`
+	// AITargets selects the agents at onboarding; empty keeps codexcli.
+	AITargets []string `json:"aiTargets,omitempty"`
 }
 type Plan struct {
 	SchemaVersion int                 `json:"schemaVersion"`

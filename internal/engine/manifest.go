@@ -57,8 +57,10 @@ func validateManifest(m Manifest) error {
 	if c.Path != "." && (!regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]*(/[a-zA-Z0-9_][a-zA-Z0-9_-]*)*$`).MatchString(c.Path)) {
 		return fmt.Errorf("component path must be a literal relative directory")
 	}
-	if len(m.AI.Targets) > 0 && (len(m.AI.Targets) != 1 || m.AI.Targets[0] != "codexcli") {
-		return fmt.Errorf("only the codexcli adapter is supported")
+	for i, target := range m.AI.Targets {
+		if !contains(supportedTargets, target) || contains(m.AI.Targets[:i], target) {
+			return fmt.Errorf("ai.targets supports codexcli and claudecode without duplicates")
+		}
 	}
 	if m.Gitignore.Local != ".standards/gitignore.local" {
 		return fmt.Errorf("gitignore.local path is reserved")
