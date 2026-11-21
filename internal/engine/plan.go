@@ -382,6 +382,10 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	if len(automationPathsFor(m)) > 0 {
 		required = append(required, automationPathsFor(m)...)
 	}
+	if contains(m.AI.Targets, "claudecode") {
+		// Without the sources, a fresh clone cannot reapply the merged Claude files.
+		required = append(required, claudeInstructionsSource, claudeSettingsSource)
+	}
 	if err := validateIgnore(desired[".gitignore"].Content, required...); err != nil {
 		return nil, err
 	}

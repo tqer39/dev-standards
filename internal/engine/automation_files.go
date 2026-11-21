@@ -83,7 +83,10 @@ func automationPathsFor(m Manifest) []string {
 // before adoption and the shared entry.
 func instructionFile(p *Plan, desired map[string]Snapshot, previous State, m Manifest, target, source string) error {
 	local := p.Inputs[source]
-	if !local.Exists {
+	if reacquired(p, previous, target, source) {
+		local = file(normalized(p.Inputs[target].Content))
+		desired[source] = local
+	} else if !local.Exists {
 		local = file(normalized(p.Inputs[target].Content))
 		if _, owned := previous.Files[target]; owned {
 			return fmt.Errorf("%s source missing", strings.TrimSuffix(target, ".md"))
@@ -103,7 +106,10 @@ func instructionFile(p *Plan, desired map[string]Snapshot, previous State, m Man
 func hookFile(p *Plan, desired map[string]Snapshot, previous State, target, source string, hook map[string]any) error {
 	settings := map[string]any{}
 	raw := p.Inputs[source]
-	if !raw.Exists {
+	if reacquired(p, previous, target, source) {
+		raw = file(p.Inputs[target].Content)
+		desired[source] = raw
+	} else if !raw.Exists {
 		raw = file(p.Inputs[target].Content)
 		if _, owned := previous.Files[target]; owned {
 			return fmt.Errorf("hook source missing")
@@ -139,6 +145,18 @@ func hookFile(p *Plan, desired map[string]Snapshot, previous State, target, sour
 	settings["hooks"] = events
 	desired[target] = file(string(JSON(settings)))
 	return nil
+}
+
+// reacquired reports a target selected again after release whose file was
+// edited while unowned; those edits become the new source instead of being lost.
+func reacquired(p *Plan, previous State, target, source string) bool {
+	if _, optional := targetOutputs[target]; !optional || !p.Inputs[source].Exists || !p.Inputs[target].Exists {
+		return false
+	}
+	if _, owned := previous.Files[target]; owned {
+		return false
+	}
+	return normalized(p.Inputs[target].Content) != normalized(p.Inputs[source].Content)
 }
 
 // releaseRemovedTargets gives back the outputs of targets no longer listed:

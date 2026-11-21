@@ -155,6 +155,26 @@ func TestSwitchTargetsFromCodexToClaudeCode(t *testing.T) {
 			t.Fatalf("%s left behind", name)
 		}
 	}
+	// Edits made while CLAUDE.md is unowned survive selecting claudecode again.
+	write(t, tree.Root, "CLAUDE.md", "# 解除中に追加した指示\n")
+	write(t, tree.Root, ".standards/repository.yml", strings.Replace(read(t, tree.Root, ".standards/repository.yml"), `"codexcli"`, `"codexcli", "claudecode"`, 1))
+	p, err = tree.Plan(Request{Mode: "reapply"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = tree.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, tree.Root, "CLAUDE.md"); !strings.Contains(got, "解除中に追加した指示") || !strings.Contains(got, "standards:prepare") {
+		t.Fatalf("edits made while unowned were lost: %s", got)
+	}
+	again, err = tree.Plan(Request{Mode: "reapply"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again.Changes) != 0 || len(again.Conflicts) != 0 {
+		t.Fatalf("reacquired target drifted: %+v %v", again.Changes, again.Conflicts)
+	}
 }
 
 func TestClaudeCodeTargetWithRulesyncKeepsCLAUDEUnmanaged(t *testing.T) {
@@ -188,5 +208,13 @@ func TestInvalidAITargets(t *testing.T) {
 	tree := fixture(t)
 	if _, err := tree.Plan(Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md", AITargets: []string{"claudecode"}}); err == nil {
 		t.Fatal("accepted targets without automation")
+	}
+}
+
+func TestClaudeCodeSourcesMustBeTracked(t *testing.T) {
+	tree := fixture(t)
+	write(t, tree.Root, ".gitignore", "claude*\n")
+	if _, err := tree.Plan(Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md", Automation: true, AITargets: []string{"claudecode"}}); err == nil || !strings.Contains(err.Error(), "claude.local.md") {
+		t.Fatalf("ignored Claude sources accepted: %v", err)
 	}
 }

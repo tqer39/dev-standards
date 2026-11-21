@@ -61,7 +61,7 @@ func (f *fakeCodex) Run(ctx context.Context, dir, exe string, args []string, inp
 		panic("simulated project interruption")
 	}
 	if exe == "claude" {
-		return f.claude(dir, args)
+		return f.claude(dir, args, input)
 	}
 	if exe != "codex" {
 		return f.exec.Run(ctx, dir, exe, args, input)
@@ -106,7 +106,7 @@ func (f *fakeCodex) Run(ctx context.Context, dir, exe string, args []string, inp
 
 // claude mimics `claude -p --output-format json` and rejects settings that
 // would load user configuration or widen tool permissions.
-func (f *fakeCodex) claude(dir string, args []string) (string, error) {
+func (f *fakeCodex) claude(dir string, args []string, input string) (string, error) {
 	if len(args) > 0 && args[0] == "auth" {
 		return `{"loggedIn":true,"authMethod":"claude.ai"}`, nil
 	}
@@ -124,7 +124,14 @@ func (f *fakeCodex) claude(dir string, args []string) (string, error) {
 			schema = args[i+1]
 		}
 	}
-	if sources != "" || schema != resultSchema || !slices.Contains(args, "dontAsk") || !slices.Contains(args, `{"disableAllHooks":true}`) {
+	mode := "acceptEdits"
+	if review {
+		mode = "dontAsk"
+		if !strings.Contains(input, "git diff HEAD:\n") {
+			return "", fmt.Errorf("review prompt lacks the host diff")
+		}
+	}
+	if sources != "" || schema != resultSchema || !slices.Contains(args, mode) || !slices.Contains(args, `{"disableAllHooks":true}`) || slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, "Bash") }) {
 		return "", fmt.Errorf("claude runs without isolation: %v", args)
 	}
 	if review {
@@ -618,12 +625,15 @@ func TestClaudeSavedLoginLive(t *testing.T) {
 	dir := t.TempDir()
 	put(t, dir, "README.md", "# 保存済みログインの確認\n")
 	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial")
+	put(t, dir, "README.md", "# 保存済みログインの確認\n\nレビュー対象の追記。\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	if err := CheckLogin(ctx, Exec{}, "claude", dir); err != nil {
 		t.Fatal(err)
 	}
-	d, err := Agent(ctx, Exec{}, "claude", dir, "保存済み claude.ai ログインでの無人実行を確認するテストです。git status だけを実行し、ファイルを変更せず、approved=true、reason=既存ログインでの実行と構造化結果を確認した、として返してください。", true)
+	d, err := Agent(ctx, Exec{}, "claude", dir, "保存済み claude.ai ログインでの無人実行を確認するテストです。渡された差分を確認し、ファイルを変更せず、approved=true、reason=既存ログインでの実行と構造化結果を確認した、として返してください。", true)
 	if err != nil {
 		t.Fatal(err)
 	}

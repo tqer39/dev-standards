@@ -79,8 +79,9 @@ Node.js/npm では `--profile node-npm` を追加する。Claude Code に hooks 
 
 - `--setting-sources ""` と `--strict-mcp-config` で、ユーザー・プロジェクトの設定と MCP を読まない
 - `--settings '{"disableAllHooks":true}'` で hooks を無効にする
-- `--permission-mode dontAsk` で、許可リスト外のツールを確認なしで拒否する
-- 見直しは読み取り・編集と読み取り専用の Git コマンドだけ、レビューは読み取りと読み取り専用の Git コマンドだけを許可する
+- シェルを渡さない。Git の `--output` などのオプションはファイルを書けるため、レビューの差分はホストが `git diff HEAD` と未追跡ファイルの一覧を取得してプロンプトに渡す
+- 見直しは読み取りと編集だけを許可し、`acceptEdits` で書き込みを checkout 内に限る
+- レビューは読み取りだけを許可し、`dontAsk` で他のツールを確認なしで拒否する
 
 Claude Code はサブスクリプションの利用枠を開発と共有するため、利用枠の不足は認証失効と同じく失敗として記録する。
 
