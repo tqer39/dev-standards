@@ -97,5 +97,5 @@ CLI では `gh project view`、`field-list`、`item-list` で現在値と ID を
 フィールドや選択肢の ID は環境ごとに取得し、他の Project の値を流用しない。
 CLI の対応構文は公式マニュアルと実行環境の `--help` を確認する。
 
-このルールは Codex が作業の区切りで実行する手順であり、常駐同期や hooks による GitHub 書き込みを追加しない。
+このルールは主担当のエージェントが作業の区切りで実行する手順であり、常駐同期や hooks による GitHub 書き込みを追加しない。
 `check` と `verify` は、この進捗ルールの GitHub への反映を検証・代行せず、`review_required` と報告する。
