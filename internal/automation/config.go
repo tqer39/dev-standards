@@ -28,7 +28,8 @@ type Config struct {
 	Agent string `json:"agent,omitempty"`
 }
 
-func Default(source Entry) Config { return Config{1, source, []Entry{}, 1800, 32, 1200, 2, ""} }
+// The timeout covers the whole serial rollout, so it must fit several projects' CI.
+func Default(source Entry) Config { return Config{1, source, []Entry{}, 7200, 32, 1200, 2, ""} }
 func Load(name string) (Config, error) {
 	var c Config
 	f, err := os.Open(name)
@@ -51,7 +52,7 @@ func Load(name string) (Config, error) {
 	return c, nil
 }
 func (c Config) Validate() error {
-	if c.SchemaVersion != 1 || c.TimeoutSeconds < 30 || c.TimeoutSeconds > 3600 || c.MaxFiles < 1 || c.MaxFiles > 100 || c.MaxLines < 1 || c.MaxLines > 5000 || c.MaxAttempts < 1 || c.MaxAttempts > 3 {
+	if c.SchemaVersion != 1 || c.TimeoutSeconds < 30 || c.TimeoutSeconds > 14400 || c.MaxFiles < 1 || c.MaxFiles > 100 || c.MaxLines < 1 || c.MaxLines > 5000 || c.MaxAttempts < 1 || c.MaxAttempts > 3 {
 		return fmt.Errorf("invalid maintenance limits")
 	}
 	if c.Agent != "" && c.Agent != "codex" && c.Agent != "claude" {
