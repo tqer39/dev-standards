@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "PROCESS-PROJECT-TRACKING",
-  "revision": 1,
+  "revision": 2,
   "status": "active",
   "title": "Issue と横断 Projects に作業の状態と根拠を残す",
   "rationale": "会話や作業環境が変わっても、何をいつどこまで進めたかと残る条件を一覧で把握できるようにする。",
