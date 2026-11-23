@@ -19,7 +19,7 @@
   "guidance": "guidance/core/japanese-writing.md",
   "references": [
     "https://github.com/textlint/textlint",
-    "https://cspell.org/docs/configuration/",
+    "https://cspell.org/docs/Configuration",
     "https://github.com/nanaism/yomiyasu"
   ]
 }

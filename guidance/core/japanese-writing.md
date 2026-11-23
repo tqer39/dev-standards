@@ -58,5 +58,5 @@ dev-standards の `check` と `verify` は、このルール自体を `review_re
 ## 一次情報
 
 - [textlint の導入とルール設定](https://github.com/textlint/textlint#usage)
-- [cspell の設定](https://cspell.org/docs/configuration/)
+- [cspell の設定](https://cspell.org/docs/Configuration)
 - [yomiyasu の導入と使い方](https://github.com/nanaism/yomiyasu)
