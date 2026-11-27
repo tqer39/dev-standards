@@ -17,7 +17,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-const Version = "0.4.32"
+const Version = "0.4.33"
 const Repository = "tqer39/dev-standards"
 
 //go:embed schemas rules guidance profiles templates
@@ -176,7 +176,7 @@ func Catalog() ([]Rule, error) {
 			switch c.Handler {
 			case "editorconfig", "gitignore", "mise", "bootstrap", "lint", "format", "language":
 			// 生成物の一致では判定できないルール。builtin にすると check が pass と報告してしまう。
-			case "actions-security", "ci-speed", "renovate-grouping", "project-tracking", "ai-disclosure", "japanese-writing":
+			case "actions-security", "ci-speed", "renovate-grouping", "project-tracking", "ai-disclosure", "japanese-writing", "worktree":
 				wantType = "review"
 			default:
 				return fmt.Errorf("unknown handler: %s", c.Handler)
