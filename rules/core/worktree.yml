@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "PROCESS-WORKTREE",
+  "revision": 1,
+  "status": "active",
+  "title": "ファイルの変更は worktree で行う",
+  "rationale": "ハーネスを使わない変更でも、既定ブランチの元の checkout を書き換えずに作業を隔離する。",
+  "appliesTo": {"profiles": ["base"]},
+  "phases": ["adopt", "pr", "scheduled", "release"],
+  "enforcement": {"level": "warning", "waivable": false},
+  "checks": [
+    {"id": "review", "type": "review", "handler": "worktree", "parameters": {}}
+  ],
+  "remediation": {
+    "mode": "assisted",
+    "handler": "worktree",
+    "instructions": "既定ブランチの元の checkout を直接編集せず、対象リポジトリの worktree で変更する。別のエージェントに渡すときは対象のリポジトリと worktree を指定する。"
+  },
+  "guidance": "guidance/core/worktree.md",
+  "references": [
+    "https://git-scm.com/docs/git-worktree"
+  ]
+}

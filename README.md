@@ -78,6 +78,16 @@ textlint は文章規則、cspell は英単語や技術用語の綴り、yomiyas
 `check` と `verify` は導入や推敲の完了を自動判定せず、`review_required` と報告します。
 既存利用先への配布には採用版の更新計画と適用が必要です。
 
+## worktree での作業
+
+エージェントがファイルを変更するときは、既定ブランチの元の checkout ではなく worktree で行うよう指示する
+[共通ルール](guidance/core/worktree.md)を配布します。
+ハーネスを使わない対話での直接編集や、隣のリポジトリの変更、別のエージェントへの依頼にも適用します。
+自律保守または rulesync の共通入口を導入した利用先へ `.standards/rules.md` として届きます。
+これは LLM に渡す指示であり、元の checkout への書き込みを機械的に拒否する hook ではありません。
+`check` と `verify` は作業場所を検査せず、`review_required` と報告します。
+既存利用先への配布には採用版の更新計画と適用が必要です。
+
 ## 旧委譲ルールの移行
 
 旧版で配布していた `.claude/rules/dev-standards-agent-harness.md` は廃止しました。
