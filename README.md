@@ -118,8 +118,14 @@ Windows では保守検証のビルドを繰り返すため、通常テストの
 ```sh
 mise run test:race
 mise run security:check
+mise run security:actions
+mise run security:secrets
 mise run catalog:check
 ```
+
+`security:actions` は zizmor で `.github` のワークフローを、`security:secrets` は betterleaks で作業ツリーの secret を検査します。
+CI ではどちらも PR と `main` への push で実行します。
+`security:check`（govulncheck）は、PR と無関係な新しい脆弱性で PR を止めないよう、`main` への push と毎日の定期実行で確認します。
 
 保守処理の受け入れテスト `TestFleetUpdatesSourceAndProjectWithoutHumanApproval` は、
 複製したリポジトリで検証一式を再実行するため時間がかかります。

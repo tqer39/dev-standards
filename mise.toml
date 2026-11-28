@@ -6,6 +6,8 @@ npm.package_manager = "npm"
 go = "1.27.4"
 node = "26.13.1"
 "npm:markdownlint-cli2" = "0.24.1"
+"aqua:zizmorcore/zizmor" = "1.32.0"
+"aqua:betterleaks/betterleaks" = "1.10.1"
 
 [tasks.bootstrap]
 run = "go mod download"
@@ -37,6 +39,15 @@ run = "go run ./cmd/dev-standards catalog"
 
 [tasks."security:check"]
 run = "go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./..."
+
+[tasks."security:actions"]
+# self-repository（Low）はリポジトリ内の setup アクションの参照で、意図した構成なので medium 以上を見る。
+run = "zizmor --offline --min-severity medium .github"
+
+[tasks."security:secrets"]
+# 過去の誤検知を拾わないよう、全履歴ではなく作業ツリーを検査する。
+# 値をログに残さないよう伏せたうえで、検出したファイルと行を表示する。
+run = "betterleaks dir --no-banner --verbose --redact ."
 
 [tasks."session:verify"]
 run = "go run ./cmd/dev-standards session-verify"
