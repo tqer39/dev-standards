@@ -45,6 +45,10 @@ func (t *Tree) Check() (Report, error) {
 		}
 	}
 	for _, rule := range rules {
+		if rule.ID == dependencyIntakeRule || rule.ID == lockfileSourceRule {
+			// 生成物の一致ではなく、利用先の設定と lock の中身で判定する。
+			continue
+		}
 		if rule.Checks[0].Type == "review" {
 			r.Results = append(r.Results, Result{rule.ID, rule.Checks[0].ID, component, "review_required", "not evaluated by check; compare the repository with the rule guidance"})
 			continue
@@ -55,8 +59,15 @@ func (t *Tree) Check() (Report, error) {
 		r.Results = append(r.Results, Result{rule, "execution", component, "not_run", "configuration check does not execute project tasks"})
 	}
 	r.Results = append(r.Results, Result{"PROCESS-LANGUAGE", "judgment", component, "review_required", "decision structure checked; suitability needs review"})
+	dependencies := t.dependencyResults(p, component)
+	r.Results = append(r.Results, dependencies...)
 	if status == "fail" {
 		return r, fail(1, "configuration drift detected")
+	}
+	for _, result := range dependencies {
+		if result.Status == "fail" {
+			return r, fail(1, "%s %s: %s", result.Rule, result.Check, result.Evidence)
+		}
 	}
 	return r, nil
 }

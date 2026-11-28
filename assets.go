@@ -17,7 +17,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-const Version = "0.4.35"
+const Version = "0.4.36"
 const Repository = "tqer39/dev-standards"
 
 //go:embed schemas rules guidance profiles templates
@@ -174,7 +174,7 @@ func Catalog() ([]Rule, error) {
 		for _, c := range rule.Checks {
 			wantType := "builtin"
 			switch c.Handler {
-			case "editorconfig", "gitignore", "mise", "bootstrap", "lint", "format", "language":
+			case "editorconfig", "gitignore", "mise", "bootstrap", "lint", "format", "language", "dependency-intake", "lockfile-source":
 			// 生成物の一致では判定できないルール。builtin にすると check が pass と報告してしまう。
 			case "actions-security", "ci-speed", "renovate-grouping", "project-tracking", "ai-disclosure", "japanese-writing", "worktree", "typescript-tsrs":
 				wantType = "review"

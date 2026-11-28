@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -58,6 +59,51 @@ func validatePythonInputs(p *Plan, c Component) error {
 		return fmt.Errorf("uv.lock must declare an integer version")
 	}
 	return nil
+}
+
+// uvLockViolations lists the packages uv would fetch from anywhere but PyPI,
+// or without a sha256 hash. Editable, virtual and directory sources are local.
+func uvLockViolations(content string) ([]string, error) {
+	var lock struct {
+		Package []struct {
+			Name   string           `toml:"name"`
+			Source map[string]any   `toml:"source"`
+			Sdist  map[string]any   `toml:"sdist"`
+			Wheels []map[string]any `toml:"wheels"`
+		} `toml:"package"`
+	}
+	if _, err := toml.Decode(content, &lock); err != nil {
+		return nil, err
+	}
+	var found []string
+	for _, pkg := range lock.Package {
+		local := false
+		for _, kind := range []string{"editable", "virtual", "directory"} {
+			if _, ok := pkg.Source[kind]; ok {
+				local = true
+			}
+		}
+		if local {
+			continue
+		}
+		ok := pkg.Source["registry"] == "https://pypi.org/simple"
+		files := pkg.Wheels
+		if pkg.Sdist != nil {
+			files = append([]map[string]any{pkg.Sdist}, files...)
+		}
+		for _, f := range files {
+			url, _ := f["url"].(string)
+			hash, _ := f["hash"].(string)
+			if !strings.HasPrefix(url, "https://files.pythonhosted.org/") || !strings.HasPrefix(hash, "sha256:") {
+				ok = false
+			}
+		}
+		if !ok {
+			found = append(found, pkg.Name)
+		}
+	}
+	sort.Strings(found)
+	return found, nil
 }
 
 // Project extensions add checks without replacing the required language tasks.

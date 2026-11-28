@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "id": "CORE-DEPENDENCY-INTAKE",
+  "revision": 1,
+  "status": "active",
+  "title": "公開直後の依存と install スクリプトを取り込まない",
+  "rationale": "乗っ取られたアカウントから公開された悪性版を、人やエージェントが手元で依存を追加したときにも取り込まないようにする。",
+  "appliesTo": {
+    "profiles": [
+      "base"
+    ]
+  },
+  "phases": [
+    "adopt",
+    "pr"
+  ],
+  "enforcement": {
+    "level": "warning",
+    "waivable": false
+  },
+  "checks": [
+    {
+      "id": "cooldown",
+      "type": "builtin",
+      "handler": "dependency-intake",
+      "parameters": {}
+    },
+    {
+      "id": "install-scripts",
+      "type": "builtin",
+      "handler": "dependency-intake",
+      "parameters": {}
+    }
+  ],
+  "remediation": {
+    "mode": "manual",
+    "handler": "package-manager-config",
+    "instructions": "check の warn の内容に従い、npm は .npmrc に min-release-age と ignore-scripts=true を、pnpm は 11 以上にして pnpm-workspace.yaml の minimumReleaseAge と allowBuilds を、uv は pyproject.toml の tool.uv.exclude-newer を設定する。uv は設定後に uv lock を実行して uv.lock を更新する。これらのファイルは dev-standards が生成しないため、利用先で変更する。"
+  },
+  "guidance": "guidance/core/dependency-intake.md",
+  "references": [
+    "https://docs.npmjs.com/cli/v11/using-npm/config",
+    "https://pnpm.io/supply-chain-security",
+    "https://docs.astral.sh/uv/concepts/resolution/#dependency-cooldowns",
+    "https://docs.renovatebot.com/key-concepts/minimum-release-age/"
+  ]
+}

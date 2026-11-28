@@ -3,6 +3,8 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 )
 
 var nodeScripts = []string{"lint", "format", "format:check", "test", "build"}
@@ -52,6 +54,46 @@ func validateNodeInputs(p *Plan, c Component) error {
 		return fmt.Errorf("package-lock.json must use lockfileVersion 2 or later")
 	}
 	return nil
+}
+
+// npmLockViolations lists the packages npm would fetch from anywhere but the
+// public registry, or without a sha512 integrity. Links, bundled packages and
+// local directories carry no fetch of their own.
+func npmLockViolations(content string) ([]string, error) {
+	var lock struct {
+		LockfileVersion int `json:"lockfileVersion"`
+		Packages        map[string]struct {
+			Resolved  string `json:"resolved"`
+			Integrity string `json:"integrity"`
+			Link      bool   `json:"link"`
+			InBundle  bool   `json:"inBundle"`
+		} `json:"packages"`
+	}
+	if err := json.Unmarshal([]byte(content), &lock); err != nil {
+		return nil, err
+	}
+	if lock.LockfileVersion < 2 {
+		// 版 1 には packages がなく、空の一覧を合格と誤って報告してしまう。
+		return nil, fmt.Errorf("lockfileVersion 2 or later is required")
+	}
+	var found []string
+	for name, pkg := range lock.Packages {
+		local := !strings.Contains("/"+name, "/node_modules/") && pkg.Resolved == ""
+		if name == "" || pkg.InBundle || local {
+			continue
+		}
+		if pkg.Link {
+			if strings.Contains(pkg.Resolved, ":") {
+				found = append(found, name)
+			}
+			continue
+		}
+		if !strings.HasPrefix(pkg.Resolved, "https://registry.npmjs.org/") || !strings.HasPrefix(pkg.Integrity, "sha512-") {
+			found = append(found, name)
+		}
+	}
+	sort.Strings(found)
+	return found, nil
 }
 
 // Lifecycle scripts stay disabled so bootstrap does not run dependency code.

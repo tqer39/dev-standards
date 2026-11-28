@@ -293,6 +293,28 @@ Node.js/npm の利用先で依存導入前に既存の安全性検査が必要�
 mise exec aqua:betterleaks/betterleaks@1.10.1 -- betterleaks dir --no-banner --verbose --redact --unsafe-auto-load-config .
 ```
 
+## 依存の取り込みと lockfile の検査
+
+`check` と `verify` は、plan の入力にある `package-lock.json`、`pnpm-lock.yaml`、`uv.lock` と、
+同じディレクトリのパッケージマネージャーの設定を読んで、次の 3 つを判定します。
+設定ファイルは生成しません。利用先が自分で書きます。
+
+| ルール | check | 判定 | 不足のときの報告 |
+| --- | --- | --- | --- |
+| `CORE-DEPENDENCY-INTAKE` | `cooldown` | 公開直後の版を解決しない待機期間（npm の `min-release-age`、pnpm の `minimumReleaseAge`、uv の `exclude-newer`） | `warn`。終了コードは変えません |
+| `CORE-DEPENDENCY-INTAKE` | `install-scripts` | 依存の install スクリプトの抑止（npm の `ignore-scripts=true`、pnpm 11 以上の既定と `allowBuilds`） | `warn`。終了コードは変えません |
+| `CORE-LOCKFILE-SOURCE` | `source` | lockfile の取得元が公式レジストリで、完全性ハッシュがあること | `fail`。終了コード 1 で終了します |
+
+- 対象の lockfile がなければ `not_applicable` と報告します。
+- `warn` は適合を意味しません。採用版の更新と同時に利用先の必須チェックが失敗しないよう、不適合にしていないだけです。
+  報告の `evidence` に、足りない設定とファイルを表示します。
+- 取得元の検査は、git・URL・tarball を指す依存と、公式以外のレジストリを不適合にします。
+  採用版を上げる前に、`dev-standards check` の `source` が `pass` であることを確認してください。
+- `.npmrc` は認証情報を含むことがあるので、plan の入力には含めず、`check` が 2 つの設定だけを読みます。
+
+設定の例、lockfile・CI・Renovate との関係は[依存の取り込みのルール](guidance/core/dependency-intake.md)、
+取得元の条件は [lockfile の取得元のルール](guidance/core/lockfile-source.md)を参照してください。
+
 ## CI の重複起動を抑える
 
 自動化の共通 CI では、既定で `push` と `pull_request` の両方を検証します。
