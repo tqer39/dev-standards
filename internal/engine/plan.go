@@ -423,7 +423,8 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		for name, baseline := range state.Files {
 			_, removedTarget := targetOutputs[name]
 			if !contains(managedPaths, name) && name != claudeRulePath && !removedTarget {
-				return nil, fmt.Errorf("unknown managed path in previous state: %s", safePath(name))
+				// キーは任意の文字列にできるので、載せない。
+				return nil, fmt.Errorf("unknown managed path in previous state")
 			}
 			ok := baseline.Exists
 			if !ok {

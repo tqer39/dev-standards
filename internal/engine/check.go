@@ -75,7 +75,7 @@ func (t *Tree) Check() (Report, error) {
 // Verify executes the repository tasks explicitly, without claiming a review
 // of the language decision or a clean-machine bootstrap from static evidence.
 func (t *Tree) Verify(log io.Writer) (Report, error) {
-	return t.verify(nil, func(task string) error {
+	return t.verify(t.Check, func(task string) error {
 		cmd := exec.Command("mise", "run", task)
 		cmd.Dir = t.Root
 		cmd.Stdout = log
@@ -89,17 +89,14 @@ func (t *Tree) Verify(log io.Writer) (Report, error) {
 // or the tasks run then differs from the fingerprint WriteReceipt takes at the
 // end. A fingerprint error is reported after the result of Check, which says
 // more about a broken tree.
-func (t *Tree) verify(afterCheck func(), run func(task string) error) (Report, error) {
+func (t *Tree) verify(check func() (Report, error), run func(task string) error) (Report, error) {
 	fingerprint, fingerprintErr := t.Fingerprint()
-	r, err := t.Check()
+	r, err := check()
 	if err != nil {
 		return r, err
 	}
 	if fingerprintErr != nil {
 		return r, fingerprintErr
-	}
-	if afterCheck != nil {
-		afterCheck()
 	}
 	var manifest Manifest
 	snapshot, err := t.Read(".standards/repository.yml")

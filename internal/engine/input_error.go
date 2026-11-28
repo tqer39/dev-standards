@@ -25,7 +25,8 @@ func inputError(name, content string, err error) error {
 	case errors.As(err, &parse):
 		line = parse.Position.Line
 	case errors.As(err, &syntax):
-		line = lineAt(content, syntax.Offset)
+		// Offset は不正なバイトの次を指す。そのバイトが改行でも、改行のある行を示す。
+		line = lineAt(content, syntax.Offset-1)
 	case errors.As(err, &mismatch):
 		line = lineAt(content, mismatch.Offset)
 	case errors.As(err, &source) && len(source) > 0:
@@ -54,13 +55,4 @@ func safeKey(key string) string {
 		return "(key withheld)"
 	}
 	return key
-}
-
-// safePath shows a path taken from an input only when it is a plain relative
-// path.
-func safePath(p string) string {
-	if len(p) > 200 || validPath(p) != nil {
-		return "(path withheld)"
-	}
-	return p
 }

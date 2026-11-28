@@ -47,6 +47,7 @@ func TestInputErrorsNeverQuoteInputs(t *testing.T) {
 		"pyproject.toml wrong type": {pythonFixture, "session-indexer/pyproject.toml", "[project]\nname = [\"" + leakURL + "\"]\n", "session-indexer/pyproject.toml cannot be parsed"},
 		"package.json syntax":       {nodeFixture, "package.json", brokenJSON, "package.json cannot be parsed (line 3)"},
 		"package.json wrong type":   {nodeFixture, "package.json", "{\n\"scripts\": \"" + leakURL + "\"}", "package.json cannot be parsed (line 2)"},
+		"package.json raw newline":  {nodeFixture, "package.json", "{\"name\": \"" + leakURL + "\n\"}", "package.json cannot be parsed (line 1)"},
 		"package-lock.json syntax":  {nodeFixture, "package-lock.json", brokenJSON, "package-lock.json cannot be parsed (line 3)"},
 		"package-lock.json version": {nodeFixture, "package-lock.json", "{\"lockfileVersion\": \"" + leakURL + "\"}", "package-lock.json cannot be parsed (line 1)"},
 		"mise.toml syntax":          {fresh, "mise.toml", brokenTOML, "mise project configuration cannot be parsed (line 2)"},
@@ -100,7 +101,7 @@ func TestStoredStateErrorsNeverQuoteInputs(t *testing.T) {
 	state := read(t, tree.Root, ".standards/state.json")
 	write(t, tree.Root, ".standards/state.json", strings.Replace(state, `"files": {`, `"files": {"`+leakURL+`": {"exists": true, "content": "", "mode": 420},`, 1))
 	_, err := tree.Plan(Request{Mode: "reapply"})
-	if err == nil || !strings.Contains(err.Error(), "unknown managed path in previous state: (path withheld)") {
+	if err == nil || err.Error() != "unknown managed path in previous state" {
 		t.Fatalf("an unknown state key was accepted or lost its message: %v", err)
 	}
 	assertNoLeak(t, "the state error", err.Error())
@@ -210,7 +211,12 @@ func TestVerifyDetectsChangesMadeWhileCheckRuns(t *testing.T) {
 	passing := func(string) error { return nil }
 	const receipt = ".standards/cache/verified.json"
 
-	report, err := tree.verify(func() { write(t, tree.Root, "main.go", "package main\n\nfunc main() { println() }\n") }, passing)
+	// Check が判定を終えて戻るまでの間に、判定済みのファイルが変わる。
+	report, err := tree.verify(func() (Report, error) {
+		report, err := tree.Check()
+		write(t, tree.Root, "main.go", "package main\n\nfunc main() { println() }\n")
+		return report, err
+	}, passing)
 	if err == nil || err.Error() != "files changed during verification" {
 		t.Fatalf("a change made during the check was verified: %v", err)
 	}
@@ -225,7 +231,7 @@ func TestVerifyDetectsChangesMadeWhileCheckRuns(t *testing.T) {
 	}
 
 	// 変更がなければ、同じ手順で検証記録を残す。
-	if _, err := tree.verify(nil, passing); err != nil {
+	if _, err := tree.verify(tree.Check, passing); err != nil {
 		t.Fatal(err)
 	}
 	if !tree.ReceiptValid() {
@@ -234,7 +240,7 @@ func TestVerifyDetectsChangesMadeWhileCheckRuns(t *testing.T) {
 
 	// タスクの途中の変更は、これまでどおり検出する。
 	changed := false
-	_, err = tree.verify(nil, func(string) error {
+	_, err = tree.verify(tree.Check, func(string) error {
 		if !changed {
 			changed = true
 			write(t, tree.Root, "main.go", "package main\n\nfunc main() {}\n")
