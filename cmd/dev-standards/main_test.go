@@ -308,3 +308,70 @@ func TestCLIErrorsNeverQuoteBrokenInputs(t *testing.T) {
 		t.Fatalf("apply quotes the broken plan: %s", text)
 	}
 }
+
+// 英数字だけのキーや値も、形からは秘密でないと言えないので、エラーに出さない。
+func TestCLIErrorsNeverQuotePlainKeysOrValues(t *testing.T) {
+	const marker = "fixturecredentialmarker"
+	target := t.TempDir()
+	if b, err := exec.Command("git", "-C", target, "init", "--quiet").CombinedOutput(); err != nil {
+		t.Fatalf("%s %v", b, err)
+	}
+	put := func(name, content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(target, name)), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(target, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	config := "[tools]\ngo = \"1.27.3\"\n"
+	for _, name := range []string{"bootstrap", "lint", "format", "format:check", "test", "build"} {
+		config += "[tasks.\"repo:" + name + "\"]\nrun = \"echo checked\"\n"
+	}
+	put("mise.toml", config)
+	put("package.json", `{"name":"root"}`)
+	put("decision.md", languageRecord)
+	invoke := func(want int, args ...string) string {
+		t.Helper()
+		var out, log bytes.Buffer
+		if got := run(append(args, "--repo", target), &out, &log); got != want {
+			t.Fatalf("%v: got %d want %d: %s", args, got, want, log.String())
+		}
+		return out.String() + log.String()
+	}
+	planPath := filepath.Join(t.TempDir(), "plan.json")
+	invoke(1, "adopt", "--profile", "mise-project", "--decision", "decision.md", "--output", planPath)
+	invoke(0, "apply", "--plan", planPath)
+	invoke(0, "check")
+	read := func(name string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(target, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	tools, manifest := read(".standards/mise.project.toml"), read(".standards/repository.yml")
+	broken := map[string]struct{ content, want string }{
+		".standards/mise.project.toml": {strings.Replace(tools, "[tools]\n", "[tools]\n"+marker+" = \"latest\"\n", 1), "every tool in the tools table must be pinned explicitly"},
+		".standards/repository.yml":    {strings.Replace(manifest, `"profile": "mise-project"`, `"profile": "`+marker+`"`, 1), "unsupported profile"},
+	}
+	for name, c := range broken {
+		original := read(name)
+		if c.content == original {
+			t.Fatalf("the fixture did not change %s", name)
+		}
+		put(name, c.content)
+		for _, args := range [][]string{{"check"}, {"verify"}, {"plan"}, {"plan", "--upgrade"}} {
+			text := invoke(2, args...)
+			if strings.Contains(strings.ToLower(text), marker) {
+				t.Fatalf("%v quotes a key or value of %s: %s", args, name, text)
+			}
+			if !strings.Contains(text, c.want) {
+				t.Fatalf("%v lost its diagnosis for %s: %s", args, name, text)
+			}
+		}
+		put(name, original)
+	}
+}

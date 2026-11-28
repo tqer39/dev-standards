@@ -15,9 +15,12 @@ const (
 	leakNames = "example.com"
 )
 
+// 英数字だけの値。URL や記号がなくても、秘密でないとは言えない。
+var plainMarker = strings.ToLower(marker)
+
 func assertNoLeak(t *testing.T, what, text string) {
 	t.Helper()
-	if strings.Contains(text, marker) || strings.Contains(text, leakNames) {
+	if strings.Contains(strings.ToLower(text), plainMarker) || strings.Contains(text, leakNames) {
 		t.Fatalf("%s quotes its input: %s", what, text)
 	}
 }
@@ -28,6 +31,26 @@ func TestInputErrorsNeverQuoteInputs(t *testing.T) {
 		tree := fixture(t)
 		adopt(t, tree)
 		return tree, Request{Mode: "reapply"}
+	}
+	projectAdopted := func(t *testing.T) (*Tree, Request) {
+		tree, req := projectFixture(t)
+		plan, err := tree.Plan(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tree.Apply(plan); err != nil {
+			t.Fatal(err)
+		}
+		return tree, Request{Mode: "reapply"}
+	}
+	companions := func(content string) func(*testing.T) (*Tree, Request) {
+		return func(t *testing.T) (*Tree, Request) {
+			tree, req := nodeFixture(t)
+			write(t, tree.Root, "harness/go.mod", "module example.com/harness\n")
+			write(t, tree.Root, "companions.json", content)
+			req.CompanionsPath = "companions.json"
+			return tree, req
+		}
 	}
 	fresh := func(t *testing.T) (*Tree, Request) {
 		return fixture(t), Request{Mode: "adopt", Profile: "go", DecisionPath: "decision.md"}
@@ -51,7 +74,13 @@ func TestInputErrorsNeverQuoteInputs(t *testing.T) {
 		"package-lock.json syntax":  {nodeFixture, "package-lock.json", brokenJSON, "package-lock.json cannot be parsed (line 3)"},
 		"package-lock.json version": {nodeFixture, "package-lock.json", "{\"lockfileVersion\": \"" + leakURL + "\"}", "package-lock.json cannot be parsed (line 1)"},
 		"mise.toml syntax":          {fresh, "mise.toml", brokenTOML, "mise project configuration cannot be parsed (line 2)"},
-		"mise tool key":             {projectFixture, "mise.toml", "[tools]\n\"" + leakURL + "\" = \"latest\"\n", "tools.(key withheld) must be pinned explicitly"},
+		"mise tool key":             {projectFixture, "mise.toml", "[tools]\n\"" + leakURL + "\" = \"latest\"\n", "every tool in the tools table must be pinned explicitly"},
+		"mise plain tool key":       {projectAdopted, ".standards/mise.project.toml", "[tools]\n" + plainMarker + " = \"latest\"\n", "every tool in the tools table must be pinned explicitly"},
+		"profile value":             {goAdopted, ".standards/repository.yml", strings.Replace(string(JSON(defaultManifest())), `"profile": "go"`, `"profile": "`+plainMarker+`"`, 1), "unsupported profile; supported profiles"},
+		"companion task name":       {companions(`[{"path":"harness","profile":"go","verifyTask":"project:verify:` + plainMarker + `"}]`), "harness/main.go", "package main\n", "define the verification task of companion 1"},
+		"companion duplicate path":  {companions(`[{"path":"harness","profile":"go","verifyTask":"project:verify:a"},{"path":"harness","profile":"go","verifyTask":"project:verify:` + plainMarker + `"}]`), "harness/main.go", "package main\n", "duplicate component path in companion 2"},
+		"package.json ends early":   {nodeFixture, "package.json", "{\"name\":\n", "package.json cannot be parsed (line 2)"},
+		"package.json ends on line": {nodeFixture, "package.json", "{\"name\":", "package.json cannot be parsed (line 1)"},
 		"editorconfig line":         {fresh, ".editorconfig", "[*]\nindent_size = 2\nhttps://user:" + marker + "@example.com/simple\n", "invalid EditorConfig line 3"},
 		"hook source":               {func(t *testing.T) (*Tree, Request) { tree, req := fresh(t); req.Automation = true; return tree, req }, ".codex/hooks.json", brokenJSON, "hook source .standards/hooks.local.json cannot be parsed (line 3)"},
 		"repository.yml syntax":     {goAdopted, ".standards/repository.yml", "schemaVersion: 1\n" + marker + ": [" + leakURL, "repository.yml: invalid YAML at line"},

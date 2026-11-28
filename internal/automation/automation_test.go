@@ -1550,3 +1550,71 @@ func TestPrepareNeverRecordsBrokenInputValues(t *testing.T) {
 		}
 	}
 }
+
+// 英数字だけのキーや値も、hook の出力と feedback の記録に残さない。
+func TestPrepareNeverRecordsPlainKeysOrValues(t *testing.T) {
+	const marker = "fixturecredentialmarker"
+	t.Setenv("DEV_STANDARDS_MAINTENANCE", "")
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	config := "[tools]\ngo = \"1.27.3\"\n"
+	for _, name := range []string{"bootstrap", "lint", "format", "format:check", "test", "build"} {
+		config += "[tasks.\"repo:" + name + "\"]\nrun = \"echo checked\"\n"
+	}
+	put(t, dir, "mise.toml", config)
+	put(t, dir, "package.json", `{"name":"root"}`)
+	put(t, dir, "decision.md", "# 言語選定\n\n## 要件\n\n複数の OS で動作する CLI を開発する。\n\n## 候補\n\nGo と Python を配布方法から比較する。\n\n## 選定理由\n\nGo を採用し単体バイナリを配布する。\n")
+	tree, err := engine.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tree.Close()
+	plan, err := tree.Plan(engine.Request{Mode: "adopt", Profile: "mise-project", DecisionPath: "decision.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	leaked := func(text string) bool { return strings.Contains(strings.ToLower(text), marker) }
+	read := func(name string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	tools, manifest := read(".standards/mise.project.toml"), read(".standards/repository.yml")
+	broken := map[string]struct{ content, want string }{
+		".standards/mise.project.toml": {strings.Replace(tools, "[tools]\n", "[tools]\n"+marker+" = \"latest\"\n", 1), "every tool in the tools table must be pinned explicitly"},
+		".standards/repository.yml":    {strings.Replace(manifest, `"profile": "mise-project"`, `"profile": "`+marker+`"`, 1), "unsupported profile"},
+	}
+	for name, c := range broken {
+		original := read(name)
+		if c.content == original {
+			t.Fatalf("the fixture did not change %s", name)
+		}
+		put(t, dir, name, c.content)
+		text, err := Prepare(context.Background(), dir)
+		if err == nil || !strings.Contains(err.Error(), c.want) || leaked(text+err.Error()) {
+			t.Fatalf("prepare with %s: %s %v", name, text, err)
+		}
+		for _, event := range []string{"SessionStart", "Stop"} {
+			result, err := Hook(dir, HookInput{Event: event})
+			if err != nil || leaked(string(mustJSON(t, result))) {
+				t.Fatalf("%s hook with %s: %v %v", event, name, result, err)
+			}
+		}
+		put(t, dir, name, original)
+	}
+	records, err := filepath.Glob(filepath.Join(dir, ".standards/cache/feedback/*.json"))
+	if err != nil || len(records) != len(broken) {
+		t.Fatalf("the failed checks left %d feedback records: %v", len(records), err)
+	}
+	for _, record := range records {
+		if b, err := os.ReadFile(record); err != nil || leaked(string(b)) {
+			t.Fatalf("feedback %s: %s %v", record, b, err)
+		}
+	}
+}

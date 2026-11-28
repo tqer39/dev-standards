@@ -50,11 +50,11 @@ func Open(root string) (*Tree, error) {
 func (t *Tree) Close() error { return t.fs.Close() }
 func validPath(p string) error {
 	if p == "" || p == "." || strings.ContainsAny(p, "\\:\x00\r\n") || strings.HasPrefix(p, "/") || path.Clean(p) != p {
-		return fmt.Errorf("invalid relative path: %q", p)
+		return fmt.Errorf("invalid relative path")
 	}
 	for _, part := range strings.Split(p, "/") {
 		if part == ".." || strings.EqualFold(part, ".git") || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
-			return fmt.Errorf("unsafe path: %q", p)
+			return fmt.Errorf("unsafe path")
 		}
 	}
 	return nil

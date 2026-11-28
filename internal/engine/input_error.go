@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"go/scanner"
-	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -26,7 +25,12 @@ func inputError(name, content string, err error) error {
 		line = parse.Position.Line
 	case errors.As(err, &syntax):
 		// Offset は不正なバイトの次を指す。そのバイトが改行でも、改行のある行を示す。
-		line = lineAt(content, syntax.Offset-1)
+		// 入力が途中で終わった場合は不正なバイトがなく、Offset が末尾そのものを指す。
+		offset := syntax.Offset - 1
+		if syntax.Error() == "unexpected end of JSON input" {
+			offset = syntax.Offset
+		}
+		line = lineAt(content, offset)
 	case errors.As(err, &mismatch):
 		line = lineAt(content, mismatch.Offset)
 	case errors.As(err, &source) && len(source) > 0:
@@ -43,16 +47,4 @@ func lineAt(content string, offset int64) int {
 		return 0
 	}
 	return 1 + strings.Count(content[:offset], "\n")
-}
-
-var toolKey = regexp.MustCompile(`^[A-Za-z0-9._-]+(?::[A-Za-z0-9@._/-]+)?$`)
-
-// safeKey shows a key from an input only when it has the shape of a mise tool
-// name. Whoever edits the file can put any string, such as a URL with
-// credentials, where a key is expected.
-func safeKey(key string) string {
-	if len(key) > 80 || strings.Contains(key, "//") || !toolKey.MatchString(key) {
-		return "(key withheld)"
-	}
-	return key
 }

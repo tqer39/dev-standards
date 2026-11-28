@@ -14,10 +14,11 @@ func validateMiseProject(cfg map[string]any) error {
 	if !ok || len(tools) == 0 {
 		return fmt.Errorf("mise-project requires pinned tools")
 	}
-	for name, value := range tools {
+	for _, value := range tools {
 		version, ok := value.(string)
 		if !ok || version == "" || version == "latest" || version == "system" || version == "lts" || strings.ContainsAny(version, "*<>=^~ ") {
-			return fmt.Errorf("tools.%s must be pinned explicitly", safeKey(name))
+			// キーは任意の文字列にできる。形を限っても秘密でないとは言えないので、載せない。
+			return fmt.Errorf("every tool in the tools table must be pinned explicitly")
 		}
 	}
 	for _, name := range []string{"node", "python", "go", "uv", "pnpm"} {

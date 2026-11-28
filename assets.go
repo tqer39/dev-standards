@@ -254,7 +254,8 @@ type Profile struct {
 // ResolveProfile validates both shared and language-specific references.
 func ResolveProfile(id string) (Profile, error) {
 	if id != "go" && id != "python-uv" && id != "node-npm" && id != "mise-project" {
-		return Profile{}, fmt.Errorf("unsupported profile: %s", id)
+		// id は利用先の設定の値なので、載せない。
+		return Profile{}, fmt.Errorf("unsupported profile; supported profiles: go, python-uv, node-npm, mise-project")
 	}
 	rules, err := Catalog()
 	if err != nil {

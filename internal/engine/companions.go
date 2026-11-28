@@ -25,22 +25,23 @@ func validateCompanions(m Manifest) error {
 	}
 	seen := map[string]bool{}
 	seenTasks := map[string]bool{}
-	for _, c := range m.Companions {
+	// 設定の値は載せず、何番目の companion かで示す。
+	for i, c := range m.Companions {
 		if c.Profile != "go" && c.Profile != "swift" {
-			return fmt.Errorf("unsupported companion profile: %s", c.Profile)
+			return fmt.Errorf("unsupported companion profile in companion %d", i+1)
 		}
 		if !regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]*(/[a-zA-Z0-9_][a-zA-Z0-9_-]*)*$`).MatchString(c.Path) {
 			return fmt.Errorf("companion path must be a literal nested directory")
 		}
 		if c.Path == m.Components[0].Path || seen[c.Path] {
-			return fmt.Errorf("duplicate component path: %s", c.Path)
+			return fmt.Errorf("duplicate component path in companion %d", i+1)
 		}
 		seen[c.Path] = true
 		if !regexp.MustCompile(`^project:verify:[a-z][a-z0-9-]*$`).MatchString(c.VerifyTask) {
 			return fmt.Errorf("invalid companion verification task")
 		}
 		if seenTasks[c.VerifyTask] {
-			return fmt.Errorf("duplicate companion verification task: %s", c.VerifyTask)
+			return fmt.Errorf("duplicate companion verification task in companion %d", i+1)
 		}
 		seenTasks[c.VerifyTask] = true
 		if c.Profile == "swift" && strings.Join(m.Platforms, ",") != "macos" {
@@ -55,25 +56,25 @@ func validateCompanionTasks(m Manifest, source string) error {
 	if _, err := toml.Decode(source, &tasks); err != nil {
 		return inputError(".standards/tasks.project.toml", source, err)
 	}
-	for _, c := range m.Companions {
+	for i, c := range m.Companions {
 		task, ok := tasks[c.VerifyTask].(map[string]any)
 		if !ok {
-			return fmt.Errorf("define companion task %s in .standards/tasks.project.toml", c.VerifyTask)
+			return fmt.Errorf("define the verification task of companion %d in .standards/tasks.project.toml", i+1)
 		}
 		// A success receipt must not be issued because mise skipped a companion.
 		for _, key := range []string{"platforms", "sources", "outputs", "skip", "depends", "depends_post", "wait_for"} {
 			if _, ok := task[key]; ok {
-				return fmt.Errorf("companion task %s cannot use %s", c.VerifyTask, key)
+				return fmt.Errorf("the verification task of companion %d cannot use %s", i+1, key)
 			}
 		}
 		switch run := task["run"].(type) {
 		case string:
 			if strings.TrimSpace(run) == "" {
-				return fmt.Errorf("empty companion task: %s", c.VerifyTask)
+				return fmt.Errorf("the verification task of companion %d is empty", i+1)
 			}
 		case []any:
 			if len(run) == 0 {
-				return fmt.Errorf("empty companion task: %s", c.VerifyTask)
+				return fmt.Errorf("the verification task of companion %d is empty", i+1)
 			}
 			for _, command := range run {
 				if s, ok := command.(string); !ok || strings.TrimSpace(s) == "" {
@@ -81,7 +82,7 @@ func validateCompanionTasks(m Manifest, source string) error {
 				}
 			}
 		default:
-			return fmt.Errorf("companion task %s needs an explicit run command", c.VerifyTask)
+			return fmt.Errorf("the verification task of companion %d needs an explicit run command", i+1)
 		}
 	}
 	return nil
