@@ -12,17 +12,41 @@ Renovate の `minimumReleaseAge` は Renovate が作る更新にしか効かな�
 
 | lockfile | 待機期間（`cooldown`） | install スクリプト（`install-scripts`） |
 | --- | --- | --- |
-| `package-lock.json` | `.npmrc` の `min-release-age` が正の日数 | `.npmrc` の `ignore-scripts=true` |
-| `pnpm-lock.yaml` | `pnpm-workspace.yaml` の `minimumReleaseAge` が正の分数。未指定なら pnpm 11 以上 | pnpm 11 以上で、`dangerouslyAllowAllBuilds` が `true` でない |
-| `uv.lock` | `pyproject.toml` の `[tool.uv]` の `exclude-newer` | 判定しない（後述） |
+| `package-lock.json` | `.npmrc` の `min-release-age` が正の日数で、実行する npm が 11.10 以上 | `.npmrc` の `ignore-scripts=true` |
+| `pnpm-lock.yaml` | `pnpm-workspace.yaml` の `minimumReleaseAge` が正の分数で、`minimumReleaseAgeStrict` が `false` でない | pnpm 11 以上で、`dangerouslyAllowAllBuilds` が有効でない |
+| `uv.lock` | `uv.toml`、なければ `pyproject.toml` の `[tool.uv]` の `exclude-newer` が、正の期間か過去の日時 | 判定しない（後述） |
+
+npm:
+
+- `min-release-age` は npm 11.10.0 で追加された。それより前の npm は設定を無視するので、設定があっても合格にしない。
+- npm の版は、`package.json` の `packageManager`（`npm@x.y.z`）、`.standards/mise.project.toml` の `tools.npm`、
+  `tools.node` の順に読む。`tools.node` からは同梱の npm を判断する。
+  npm 11.10 以上を同梱するのは、Node.js 24.14.1 以上の 24 系、25.7.0 以上の 25 系、26 以上である。
+- 版が分からない場合も合格にしない。`package.json` の `engines` は判定に使わない。
+
+pnpm:
 
 - pnpm の版は、`package.json` の `packageManager`、なければ `.standards/mise.project.toml` の `tools.pnpm` から読む。
-- pnpm 11 以上は、`minimumReleaseAge` の既定が 1440 分（1 日）で、依存の build script を既定で実行しない。
-  このため、設定を書かなくても合格になる。`minimumReleaseAge: 0` は待機を無効にするので合格にしない。
-- pnpm 11 で `onlyBuiltDependencies` などは廃止され、`allowBuilds` に置き換わった。
-  build script が必要な依存だけを `allowBuilds` で許可する。
+- pnpm 11 以上は `minimumReleaseAge` の既定が 1440 分（1 日）だが、既定の待機は strict ではない。
+  条件を満たす版がないと、待機期間の内側の版を取り込む。このため、既定のままでは合格にしない。
+- `minimumReleaseAge` を明示すると `minimumReleaseAgeStrict` の既定が `true` になり、満たす版がなければ失敗する。
+  既定の 1 日のまま合格にするには、`minimumReleaseAgeStrict: true` を書く。
+- pnpm 11 以上は、依存の build script を既定で実行しない。pnpm 11 で `onlyBuiltDependencies` などは廃止され、
+  `allowBuilds` に置き換わった。build script が必要な依存だけを `allowBuilds` で許可する。
+
+uv:
+
+- 同じディレクトリに `uv.toml` があると、uv は `pyproject.toml` の `[tool.uv]` を読まない。`check` も `uv.toml` だけを読む。
+- `exclude-newer` は、`"7 days"` や `P7D` のような正の期間か、過去の RFC 3339 の日時のときだけ合格にする。
+  0 の期間、未来の日時、解釈できない値は合格にしない。
+
+共通:
+
 - `node-npm` と `python-uv` はコンポーネントの lockfile を、`mise-project` はリポジトリ内のすべての lockfile を対象にする。
   対象の lockfile がなければ `not_applicable` と報告する。
+- `check` が読むのはリポジトリ内の設定だけである。利用者や端末の設定（`~/.npmrc`、`~/.config/uv/uv.toml` など）、
+  環境変数、コマンドラインの指定は判定しない。
+- 読めない設定、解析できない設定は合格にしない。
 
 ## 判定の扱い
 
@@ -45,6 +69,7 @@ ignore-scripts=true
 
 ```yaml
 minimumReleaseAge: 10080
+minimumReleaseAgeStrict: true
 allowBuilds:
   esbuild: true
 ```
@@ -56,7 +81,7 @@ allowBuilds:
 exclude-newer = "7 days"
 ```
 
-- npm の `min-release-age` は npm 11.10 以上で使える。`.npmrc` に認証情報を書かない。
+- リポジトリの `.npmrc` に認証情報を書かない。
 - `ignore-scripts=true` にすると、依存の `postinstall` などは実行されない。
   ネイティブモジュールなどで必要な場合は、`npm rebuild <package>` を明示して実行する。
   `npm run` や `npm test` で指定したスクリプトは実行されるが、その `pre`・`post` スクリプトは実行されない。

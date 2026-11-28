@@ -3,7 +3,6 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -57,9 +56,10 @@ func validateNodeInputs(p *Plan, c Component) error {
 }
 
 // npmLockViolations lists the packages npm would fetch from anywhere but the
-// public registry, or without a sha512 integrity. Links, bundled packages and
-// local directories carry no fetch of their own.
-func npmLockViolations(content string) ([]string, error) {
+// public registry, or without a sha512 integrity. Bundled packages carry no
+// fetch of their own, and neither does a link to a directory that local
+// confirms is inside the repository.
+func npmLockViolations(content string, local func(string) bool) ([]string, error) {
 	var lock struct {
 		LockfileVersion int `json:"lockfileVersion"`
 		Packages        map[string]struct {
@@ -78,21 +78,24 @@ func npmLockViolations(content string) ([]string, error) {
 	}
 	var found []string
 	for name, pkg := range lock.Packages {
-		local := !strings.Contains("/"+name, "/node_modules/") && pkg.Resolved == ""
-		if name == "" || pkg.InBundle || local {
+		if name == "" || pkg.InBundle {
 			continue
 		}
-		if pkg.Link {
-			if strings.Contains(pkg.Resolved, ":") {
+		installed := strings.Contains("/"+name, "/node_modules/")
+		switch {
+		case pkg.Link:
+			if !local(pkg.Resolved) {
 				found = append(found, name)
 			}
-			continue
-		}
-		if !strings.HasPrefix(pkg.Resolved, "https://registry.npmjs.org/") || !strings.HasPrefix(pkg.Integrity, "sha512-") {
+		case !installed && pkg.Resolved == "":
+			// link の指す先。キーがそのディレクトリのパスになる。
+			if !local(name) {
+				found = append(found, name)
+			}
+		case !strings.HasPrefix(pkg.Resolved, npmRegistry) || !strings.HasPrefix(pkg.Integrity, "sha512-"):
 			found = append(found, name)
 		}
 	}
-	sort.Strings(found)
 	return found, nil
 }
 

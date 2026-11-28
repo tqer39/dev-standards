@@ -2,13 +2,14 @@ package engine
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"go.yaml.in/yaml/v3"
@@ -19,40 +20,79 @@ const (
 	lockfileSourceRule   = "CORE-LOCKFILE-SOURCE"
 	// pnpm 11 で minimumReleaseAge の既定が 1 日になり、依存の build script も既定で止まる。
 	pnpmSafeDefaultsMajor = 11
+	npmRegistry           = "https://registry.npmjs.org/"
 )
 
-// A finding is one judgment about one file. Its text never quotes file
-// content, because .npmrc can hold credentials.
+// A finding is one judgment about one file. Its text is built from fixed
+// phrases and values this package formats itself: configuration files and
+// lockfile keys can hold credentials, and the report and the error reach
+// stdout, stderr and CI logs.
 type finding struct {
 	status, path, detail string
 }
 
-// Project-level npm settings are read here instead of through the plan: the
-// plan is printed and saved, and .npmrc can hold registry credentials.
-func (t *Tree) dependencyResults(p *Plan, component string) []Result {
-	inputs := map[string]Snapshot{}
-	for name, s := range p.Inputs {
-		inputs[name] = s
-	}
-	unreadable := map[string]error{}
-	for name, s := range p.Inputs {
-		if !s.Exists || path.Base(name) != "package-lock.json" {
-			continue
-		}
-		npmrc := path.Join(path.Dir(name), ".npmrc")
-		v, err := t.Read(npmrc)
-		if err != nil {
-			unreadable[npmrc] = err
-			continue
-		}
-		inputs[npmrc] = v
-	}
-	return dependencyResults(inputs, unreadable, component)
+// dependencyContext carries what the judgments need beyond the plan inputs.
+type dependencyContext struct {
+	// inputs holds the plan inputs plus the settings read only for the check.
+	inputs map[string]Snapshot
+	// unreadable lists settings that exist but cannot be read safely.
+	unreadable map[string]bool
+	// localDir reports whether a repository-relative path is a real directory
+	// inside the repository, reached without following a symlink.
+	localDir func(string) bool
+	now      time.Time
 }
 
-func dependencyResults(inputs map[string]Snapshot, unreadable map[string]error, component string) []Result {
-	names := make([]string, 0, len(inputs))
-	for name, s := range inputs {
+// .npmrc and uv.toml are read here instead of through the plan: the plan is
+// printed and saved, and both files can hold registry credentials.
+func (t *Tree) dependencyResults(p *Plan, component string) []Result {
+	ctx := dependencyContext{inputs: map[string]Snapshot{}, unreadable: map[string]bool{}, localDir: t.localDirectory, now: time.Now()}
+	for name, s := range p.Inputs {
+		ctx.inputs[name] = s
+	}
+	for name, s := range p.Inputs {
+		if !s.Exists {
+			continue
+		}
+		var settings []string
+		switch path.Base(name) {
+		case "package-lock.json":
+			settings = []string{".npmrc"}
+		case "pnpm-lock.yaml":
+			settings = []string{".npmrc", "pnpm-workspace.yaml"}
+		case "uv.lock":
+			settings = []string{"uv.toml"}
+		}
+		for _, base := range settings {
+			file := path.Join(path.Dir(name), base)
+			if _, planned := p.Inputs[file]; planned {
+				continue
+			}
+			v, err := t.Read(file)
+			if err != nil {
+				ctx.unreadable[file] = true
+				continue
+			}
+			ctx.inputs[file] = v
+		}
+	}
+	return dependencyResults(ctx, component)
+}
+
+func (t *Tree) localDirectory(p string) bool {
+	if p == "." {
+		return true
+	}
+	if t.safe(p) != nil {
+		return false
+	}
+	info, err := t.fs.Lstat(p)
+	return err == nil && info.IsDir()
+}
+
+func dependencyResults(ctx dependencyContext, component string) []Result {
+	names := make([]string, 0, len(ctx.inputs))
+	for name, s := range ctx.inputs {
 		if s.Exists {
 			names = append(names, name)
 		}
@@ -60,28 +100,39 @@ func dependencyResults(inputs map[string]Snapshot, unreadable map[string]error, 
 	sort.Strings(names)
 	var cooldown, scripts, sources []finding
 	for _, name := range names {
-		dir, content := path.Dir(name), inputs[name].Content
+		dir, content := path.Dir(name), ctx.inputs[name].Content
+		local := func(rel string) bool {
+			p, ok := repositoryPath(dir, rel)
+			return ok && ctx.localDir != nil && ctx.localDir(p)
+		}
+		npmrc := path.Join(dir, ".npmrc")
+		settings := npmrcSettings(ctx.inputs[npmrc].Content)
 		switch path.Base(name) {
 		case "package-lock.json":
-			npmrc := path.Join(dir, ".npmrc")
-			if err := unreadable[npmrc]; err != nil {
-				f := finding{"warn", npmrc, "cannot be read: " + err.Error()}
+			if ctx.unreadable[npmrc] {
+				f := finding{"warn", npmrc, "cannot be read safely"}
 				cooldown, scripts = append(cooldown, f), append(scripts, f)
 			} else {
-				settings := npmrcSettings(inputs[npmrc].Content)
-				cooldown = append(cooldown, npmCooldown(npmrc, settings))
+				cooldown = append(cooldown, npmCooldown(npmrc, settings, npmVersion(ctx.inputs, dir)))
 				scripts = append(scripts, npmScripts(npmrc, settings))
 			}
-			sources = append(sources, sourceFinding(name, "https://registry.npmjs.org/ with sha512 integrity", npmLockViolations, content))
+			found, err := npmLockViolations(content, local)
+			sources = append(sources, sourceFinding(name, npmRegistry+" with sha512 integrity, and the project settings keep that registry", npmPackageKey, found, err, npmrcRegistryProblems(npmrc, settings, ctx.unreadable[npmrc])))
 		case "pnpm-lock.yaml":
 			workspace := path.Join(dir, "pnpm-workspace.yaml")
-			c, s := pnpmSettings(workspace, inputs[workspace].Content, pnpmMajor(inputs, dir))
+			cfg, ok := pnpmWorkspace(ctx.inputs[workspace].Content)
+			if ctx.unreadable[workspace] {
+				ok = false
+			}
+			c, s := pnpmSettings(workspace, cfg, ok, pnpmMajor(ctx.inputs, dir))
 			cooldown, scripts = append(cooldown, c), append(scripts, s)
-			sources = append(sources, sourceFinding(name, "the registry with sha512 integrity", pnpmLockViolations, content))
+			problems := append(npmrcRegistryProblems(npmrc, settings, ctx.unreadable[npmrc]), pnpmRegistryProblems(workspace, cfg, ok)...)
+			found, err := pnpmLockViolations(content, local)
+			sources = append(sources, sourceFinding(name, npmRegistry+" with sha512 integrity, and the project settings keep that registry", pnpmPackageKey, found, err, problems))
 		case "uv.lock":
-			project := path.Join(dir, "pyproject.toml")
-			cooldown = append(cooldown, uvCooldown(project, inputs[project].Content))
-			sources = append(sources, sourceFinding(name, "https://pypi.org/simple with sha256 hashes", uvLockViolations, content))
+			cooldown = append(cooldown, uvCooldown(ctx, dir))
+			found, err := uvLockViolations(content, local)
+			sources = append(sources, sourceFinding(name, "https://pypi.org/simple with sha256 hashes", uvPackageName, found, err, nil))
 		}
 	}
 	return []Result{
@@ -108,19 +159,59 @@ func summarize(rule, check, component, subjects string, findings []finding) Resu
 	return Result{rule, check, component, status, strings.Join(parts, "; ")}
 }
 
-func sourceFinding(name, expected string, violations func(string) ([]string, error), content string) finding {
-	found, err := violations(content)
-	if err != nil {
-		return finding{"fail", name, "cannot be parsed: " + err.Error()}
+// repositoryPath resolves a lockfile's local reference against the lockfile's
+// directory. Absolute paths, URLs and paths that leave the repository are not
+// local to it.
+func repositoryPath(dir, rel string) (string, bool) {
+	if rel == "" || strings.HasPrefix(rel, "/") || strings.ContainsAny(rel, ":\\\x00") {
+		return "", false
 	}
-	if len(found) == 0 {
+	p := path.Clean(path.Join(dir, rel))
+	if p == ".." || strings.HasPrefix(p, "../") {
+		return "", false
+	}
+	return p, true
+}
+
+// A lockfile key is quoted only when it has the shape of a registry package:
+// pnpm keys a URL dependency by its URL, which can include credentials, and
+// any key can be set to an arbitrary string by whoever edits the lockfile.
+var (
+	npmPackageKey  = regexp.MustCompile(`^(?:[a-z0-9@._~-]+/)*node_modules/(?:@[a-z0-9._~-]+/)?[a-z0-9._~-]+$`)
+	pnpmPackageKey = regexp.MustCompile(`^(?:@[a-z0-9._~-]+/)?[a-z0-9._~-]+@[0-9][A-Za-z0-9._+-]*$`)
+	uvPackageName  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+)
+
+func safeNames(names []string, printable *regexp.Regexp) []string {
+	sort.Strings(names)
+	safe := make([]string, len(names))
+	for i, name := range names {
+		safe[i] = name
+		if len(name) > 120 || !printable.MatchString(name) {
+			safe[i] = fmt.Sprintf("(entry %d, name withheld)", i+1)
+		}
+	}
+	return safe
+}
+
+func sourceFinding(name, expected string, printable *regexp.Regexp, found []string, err error, problems []string) finding {
+	if err != nil {
+		// パーサーのエラーは入力の値を引用することがあるので、載せない。
+		return finding{"fail", name, "cannot be parsed"}
+	}
+	var parts []string
+	if len(found) > 0 {
+		shown := safeNames(found, printable)
+		if len(shown) > 5 {
+			shown = shown[:5]
+		}
+		parts = append(parts, fmt.Sprintf("%d packages are not fetched as required: %s", len(found), strings.Join(shown, ", ")))
+	}
+	parts = append(parts, problems...)
+	if len(parts) == 0 {
 		return finding{"pass", name, "every package comes from " + expected}
 	}
-	shown := found
-	if len(shown) > 5 {
-		shown = shown[:5]
-	}
-	return finding{"fail", name, fmt.Sprintf("%d packages do not come from %s: %s", len(found), expected, strings.Join(shown, ", "))}
+	return finding{"fail", name, strings.Join(parts, "; ")}
 }
 
 // npmrcSettings keeps the last value of each key, as npm does.
@@ -137,12 +228,156 @@ func npmrcSettings(content string) map[string]string {
 	return settings
 }
 
-func npmCooldown(npmrc string, settings map[string]string) finding {
+func officialNpmRegistry(v any) bool {
+	s, ok := v.(string)
+	return ok && strings.TrimSuffix(s, "/") == strings.TrimSuffix(npmRegistry, "/")
+}
+
+// npm replaces the registry.npmjs.org host of a lockfile URL with the
+// configured registry, and pnpm resolves integrity-only entries against it, so
+// a project .npmrc can move every download without touching the lockfile.
+func npmrcRegistryProblems(npmrc string, settings map[string]string, unreadable bool) []string {
+	if unreadable {
+		return []string{npmrc + " cannot be read safely, so the registry in effect is unknown"}
+	}
+	var problems []string
+	scoped := false
+	for key, value := range settings {
+		if key == "registry" && !officialNpmRegistry(value) {
+			problems = append(problems, npmrc+" sets registry to something other than "+npmRegistry)
+		}
+		if strings.HasSuffix(key, ":registry") && !officialNpmRegistry(value) {
+			scoped = true
+		}
+	}
+	if scoped {
+		problems = append(problems, npmrc+" sets a scoped registry to something other than "+npmRegistry)
+	}
+	return problems
+}
+
+func pnpmWorkspace(content string) (map[string]any, bool) {
+	cfg := map[string]any{}
+	if err := yaml.Unmarshal([]byte(content), &cfg); err != nil {
+		return nil, false
+	}
+	return cfg, true
+}
+
+func pnpmRegistryProblems(workspace string, cfg map[string]any, parsed bool) []string {
+	if !parsed {
+		return []string{workspace + " cannot be read or parsed, so the registry in effect is unknown"}
+	}
+	var problems []string
+	if v, set := cfg["registry"]; set && !officialNpmRegistry(v) {
+		problems = append(problems, workspace+" sets registry to something other than "+npmRegistry)
+	}
+	if v, set := cfg["registries"]; set && v != nil {
+		ok := false
+		if registries, isMap := v.(map[string]any); isMap {
+			ok = true
+			for key, value := range registries {
+				// 新しい形は URL がキー、古い形は default か scope がキーで URL が値になる。
+				_, declaration := value.(map[string]any)
+				if !(declaration && officialNpmRegistry(key)) && !officialNpmRegistry(value) {
+					ok = false
+				}
+			}
+		}
+		if !ok {
+			problems = append(problems, workspace+" declares a registry other than "+npmRegistry+" in registries")
+		}
+	}
+	for _, key := range []string{"namedRegistries", "pnprServer"} {
+		if v, set := cfg[key]; set && v != nil {
+			problems = append(problems, workspace+" sets "+key+", which can move downloads off "+npmRegistry)
+		}
+	}
+	sort.Strings(problems)
+	return problems
+}
+
+func versionParts3(s string) ([3]int, bool) {
+	var v [3]int
+	if !pinnedGo(s) {
+		return v, false
+	}
+	for i, part := range strings.Split(s, ".") {
+		v[i], _ = strconv.Atoi(part)
+	}
+	return v, true
+}
+
+func atLeast(v, min [3]int) bool {
+	for i := range v {
+		if v[i] != min[i] {
+			return v[i] > min[i]
+		}
+	}
+	return true
+}
+
+func miseTools(inputs map[string]Snapshot) map[string]any {
+	var mise struct {
+		Tools map[string]any `toml:"tools"`
+	}
+	_, _ = toml.Decode(inputs[".standards/mise.project.toml"].Content, &mise)
+	return mise.Tools
+}
+
+func packageManager(inputs map[string]Snapshot, dir, name string) (string, bool) {
+	var pkg struct {
+		PackageManager string `json:"packageManager"`
+	}
+	_ = json.Unmarshal([]byte(inputs[path.Join(dir, "package.json")].Content), &pkg)
+	version, ok := strings.CutPrefix(pkg.PackageManager, name+"@")
+	version, _, _ = strings.Cut(version, "+")
+	return version, ok
+}
+
+// npmVersion reports whether the npm that runs here is known to support
+// min-release-age, added in npm 11.10.0. Without packageManager or a mise npm
+// pin, npm is the one bundled with the pinned Node.js: 24.14.1, 25.7.0 and
+// every 26 release are the first to bundle npm 11.10 or later.
+func npmVersion(inputs map[string]Snapshot, dir string) string {
+	supported := "npm 11.10 or later"
+	tools := miseTools(inputs)
+	version, ok := packageManager(inputs, dir, "npm")
+	if !ok {
+		version, ok = tools["npm"].(string)
+	}
+	if ok {
+		if v, exact := versionParts3(version); exact && atLeast(v, [3]int{11, 10, 0}) {
+			return supported
+		} else if exact {
+			return "npm older than 11.10"
+		}
+		return ""
+	}
+	node, _ := tools["node"].(string)
+	v, exact := versionParts3(node)
+	if !exact {
+		return ""
+	}
+	if v[0] >= 26 || (v[0] == 25 && atLeast(v, [3]int{25, 7, 0})) || (v[0] == 24 && atLeast(v, [3]int{24, 14, 1})) {
+		return supported
+	}
+	return "npm older than 11.10"
+}
+
+func npmCooldown(npmrc string, settings map[string]string, version string) finding {
 	days, err := strconv.ParseFloat(settings["min-release-age"], 64)
-	if err != nil || days <= 0 {
+	if err != nil || !(days > 0) {
 		return finding{"warn", npmrc, "min-release-age is not set to a positive number of days"}
 	}
-	return finding{"pass", npmrc, "min-release-age=" + strconv.FormatFloat(days, 'f', -1, 64) + " days"}
+	set := "min-release-age=" + strconv.FormatFloat(days, 'f', -1, 64) + " days"
+	switch version {
+	case "npm 11.10 or later":
+		return finding{"pass", npmrc, set + " with " + version}
+	case "":
+		return finding{"warn", npmrc, set + ", but the npm version is not pinned in packageManager or mise, and npm older than 11.10 ignores the setting"}
+	}
+	return finding{"warn", npmrc, set + ", but the pinned tools run " + version + ", which ignores the setting"}
 }
 
 func npmScripts(npmrc string, settings map[string]string) finding {
@@ -154,31 +389,27 @@ func npmScripts(npmrc string, settings map[string]string) finding {
 
 // pnpmMajor prefers packageManager, which pnpm itself enforces, over mise.
 func pnpmMajor(inputs map[string]Snapshot, dir string) int {
-	var pkg struct {
-		PackageManager string `json:"packageManager"`
-	}
-	_ = json.Unmarshal([]byte(inputs[path.Join(dir, "package.json")].Content), &pkg)
-	version, ok := strings.CutPrefix(pkg.PackageManager, "pnpm@")
+	version, ok := packageManager(inputs, dir, "pnpm")
 	if !ok {
-		var mise struct {
-			Tools map[string]any `toml:"tools"`
-		}
-		_, _ = toml.Decode(inputs[".standards/mise.project.toml"].Content, &mise)
-		version, _ = mise.Tools["pnpm"].(string)
+		version, _ = miseTools(inputs)["pnpm"].(string)
 	}
-	major, _, _ := strings.Cut(version, ".")
-	n, _ := strconv.Atoi(major)
-	return n
+	v, _ := versionParts3(version)
+	return v[0]
 }
 
-func pnpmSettings(workspace, content string, major int) (cooldown, scripts finding) {
-	var cfg struct {
-		MinimumReleaseAge         *float64       `yaml:"minimumReleaseAge"`
-		DangerouslyAllowAllBuilds bool           `yaml:"dangerouslyAllowAllBuilds"`
-		AllowBuilds               map[string]any `yaml:"allowBuilds"`
+func number(v any) (float64, bool) {
+	switch n := v.(type) {
+	case int:
+		return float64(n), true
+	case float64:
+		return n, true
 	}
-	if err := yaml.Unmarshal([]byte(content), &cfg); err != nil {
-		f := finding{"warn", workspace, "cannot be parsed: " + err.Error()}
+	return 0, false
+}
+
+func pnpmSettings(workspace string, cfg map[string]any, parsed bool, major int) (cooldown, scripts finding) {
+	if !parsed {
+		f := finding{"warn", workspace, "cannot be read or parsed"}
 		return f, f
 	}
 	safeDefaults := major >= pnpmSafeDefaultsMajor
@@ -186,24 +417,34 @@ func pnpmSettings(workspace, content string, major int) (cooldown, scripts findi
 	if major > 0 {
 		version = fmt.Sprintf("pnpm %d", major)
 	}
+	age, explicit := cfg["minimumReleaseAge"]
+	minutes, numeric := number(age)
+	strict, strictSet := cfg["minimumReleaseAgeStrict"].(bool)
 	switch {
-	case cfg.MinimumReleaseAge != nil && *cfg.MinimumReleaseAge > 0:
-		cooldown = finding{"pass", workspace, fmt.Sprintf("minimumReleaseAge=%s minutes", strconv.FormatFloat(*cfg.MinimumReleaseAge, 'f', -1, 64))}
-	case cfg.MinimumReleaseAge != nil:
-		cooldown = finding{"warn", workspace, "minimumReleaseAge disables the cooldown"}
-	case safeDefaults:
-		cooldown = finding{"pass", workspace, version + " applies its default minimumReleaseAge of 1440 minutes"}
-	default:
+	case explicit && !(numeric && minutes > 0):
+		cooldown = finding{"warn", workspace, "minimumReleaseAge is not a positive number of minutes"}
+	case !explicit && !safeDefaults:
 		cooldown = finding{"warn", workspace, "minimumReleaseAge is not set and " + version + " has no default cooldown"}
+	case strictSet && !strict:
+		cooldown = finding{"warn", workspace, "minimumReleaseAgeStrict is false, so pnpm falls back to a version inside the cooldown"}
+	case !explicit && !strict:
+		// 既定の 1440 分は strict でなく、範囲内に古い版がなければ新しい版を取り込む。
+		cooldown = finding{"warn", workspace, version + " applies its default minimumReleaseAge without minimumReleaseAgeStrict, so it falls back to a version inside the cooldown"}
+	case !explicit:
+		cooldown = finding{"pass", workspace, version + " applies its default minimumReleaseAge of 1440 minutes with minimumReleaseAgeStrict"}
+	default:
+		cooldown = finding{"pass", workspace, "minimumReleaseAge=" + strconv.FormatFloat(minutes, 'f', -1, 64) + " minutes, enforced strictly"}
 	}
 	switch {
-	case cfg.DangerouslyAllowAllBuilds:
+	case cfg["dangerouslyAllowAllBuilds"] != nil && cfg["dangerouslyAllowAllBuilds"] != false:
 		scripts = finding{"warn", workspace, "dangerouslyAllowAllBuilds runs every dependency build script"}
 	case safeDefaults:
 		allowed := 0
-		for _, v := range cfg.AllowBuilds {
-			if v == true {
-				allowed++
+		if builds, ok := cfg["allowBuilds"].(map[string]any); ok {
+			for _, v := range builds {
+				if v == true {
+					allowed++
+				}
 			}
 		}
 		scripts = finding{"pass", workspace, fmt.Sprintf("%s blocks dependency build scripts unless allowBuilds permits them (%d permitted)", version, allowed)}
@@ -213,26 +454,95 @@ func pnpmSettings(workspace, content string, major int) (cooldown, scripts findi
 	return cooldown, scripts
 }
 
-func uvCooldown(project, content string) finding {
-	var cfg struct {
-		Tool struct {
-			UV struct {
-				ExcludeNewer any `toml:"exclude-newer"`
-			} `toml:"uv"`
-		} `toml:"tool"`
+var (
+	isoDuration      = regexp.MustCompile(`^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$`)
+	friendlyDuration = regexp.MustCompile(`^(\d+)\s*(weeks?|wks?|w|days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\s*,?\s*`)
+)
+
+// cooldownSeconds parses the durations uv documents for exclude-newer: ISO
+// 8601 such as P7D, or friendly ones such as "7 days". Anything else is not
+// taken as a cooldown, because uv does not reject every value it cannot use.
+func cooldownSeconds(s string) (int64, bool) {
+	units := []int64{7 * 86400, 86400, 3600, 60, 1}
+	var total int64
+	if m := isoDuration.FindStringSubmatch(s); m != nil && s != "P" && !strings.HasSuffix(s, "T") {
+		for i, digits := range m[1:] {
+			n, err := strconv.ParseInt("0"+digits, 10, 32)
+			if err != nil {
+				return 0, false
+			}
+			total += n * units[i]
+		}
+		return total, true
 	}
-	if _, err := toml.Decode(content, &cfg); err != nil {
-		return finding{"warn", project, "cannot be parsed: " + err.Error()}
+	rest := strings.TrimSpace(s)
+	if rest == "" {
+		return 0, false
 	}
-	if s, ok := cfg.Tool.UV.ExcludeNewer.(string); ok && strings.TrimSpace(s) != "" {
-		return finding{"pass", project, fmt.Sprintf("tool.uv.exclude-newer=%q", s)}
+	for rest != "" {
+		m := friendlyDuration.FindStringSubmatch(rest)
+		if m == nil {
+			return 0, false
+		}
+		n, err := strconv.ParseInt(m[1], 10, 32)
+		if err != nil {
+			return 0, false
+		}
+		total += n * units[strings.Index("wdhms", m[2][:1])]
+		rest = rest[len(m[0]):]
 	}
-	return finding{"warn", project, "tool.uv.exclude-newer is not set"}
+	return total, true
+}
+
+// uv reads uv.toml instead of [tool.uv] when both are in the directory.
+func uvCooldown(ctx dependencyContext, dir string) finding {
+	config := path.Join(dir, "uv.toml")
+	var value any
+	if ctx.unreadable[config] {
+		return finding{"warn", config, "cannot be read safely, and it takes precedence over pyproject.toml"}
+	} else if ctx.inputs[config].Exists {
+		var cfg map[string]any
+		if _, err := toml.Decode(ctx.inputs[config].Content, &cfg); err != nil {
+			return finding{"warn", config, "cannot be parsed, and it takes precedence over pyproject.toml"}
+		}
+		value = cfg["exclude-newer"]
+	} else {
+		config = path.Join(dir, "pyproject.toml")
+		var cfg struct {
+			Tool struct {
+				UV map[string]any `toml:"uv"`
+			} `toml:"tool"`
+		}
+		if _, err := toml.Decode(ctx.inputs[config].Content, &cfg); err != nil {
+			return finding{"warn", config, "cannot be parsed"}
+		}
+		value = cfg.Tool.UV["exclude-newer"]
+	}
+	s, ok := value.(string)
+	if !ok {
+		return finding{"warn", config, "exclude-newer is not set"}
+	}
+	if seconds, ok := cooldownSeconds(s); ok {
+		if seconds <= 0 {
+			return finding{"warn", config, "exclude-newer is a zero duration"}
+		}
+		if seconds%86400 == 0 {
+			return finding{"pass", config, fmt.Sprintf("exclude-newer is a cooldown of %d days", seconds/86400)}
+		}
+		return finding{"pass", config, fmt.Sprintf("exclude-newer is a cooldown of %d seconds", seconds)}
+	}
+	if cutoff, err := time.Parse(time.RFC3339, s); err == nil {
+		if cutoff.Before(ctx.now) {
+			return finding{"pass", config, "exclude-newer is a fixed cutoff in the past"}
+		}
+		return finding{"warn", config, "exclude-newer is a cutoff in the future"}
+	}
+	return finding{"warn", config, "exclude-newer is not a duration or an RFC 3339 timestamp this check recognizes"}
 }
 
 // pnpm 12 can write a boot document before the project's dependency graph, so
 // every document is checked instead of the first one.
-func pnpmLockViolations(content string) ([]string, error) {
+func pnpmLockViolations(content string, local func(string) bool) ([]string, error) {
 	var found []string
 	dec := yaml.NewDecoder(strings.NewReader(content))
 	for {
@@ -241,7 +551,7 @@ func pnpmLockViolations(content string) ([]string, error) {
 				Resolution map[string]any `yaml:"resolution"`
 			} `yaml:"packages"`
 		}
-		if err := dec.Decode(&doc); errors.Is(err, io.EOF) {
+		if err := dec.Decode(&doc); err == io.EOF {
 			break
 		} else if err != nil {
 			return nil, err
@@ -249,16 +559,18 @@ func pnpmLockViolations(content string) ([]string, error) {
 		for name, pkg := range doc.Packages {
 			r := pkg.Resolution
 			if r["type"] == "directory" {
+				if dir, _ := r["directory"].(string); !local(dir) {
+					found = append(found, name)
+				}
 				continue
 			}
 			tarball, hasTarball := r["tarball"].(string)
 			integrity, _ := r["integrity"].(string)
 			_, git := r["repo"]
-			if git || r["type"] == "git" || (hasTarball && !strings.HasPrefix(tarball, "https://registry.npmjs.org/")) || !strings.HasPrefix(integrity, "sha512-") {
+			if git || r["type"] != nil || (hasTarball && !strings.HasPrefix(tarball, npmRegistry)) || !strings.HasPrefix(integrity, "sha512-") {
 				found = append(found, name)
 			}
 		}
 	}
-	sort.Strings(found)
 	return found, nil
 }

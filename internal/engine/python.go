@@ -3,7 +3,6 @@ package engine
 import (
 	"fmt"
 	"path"
-	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -62,8 +61,9 @@ func validatePythonInputs(p *Plan, c Component) error {
 }
 
 // uvLockViolations lists the packages uv would fetch from anywhere but PyPI,
-// or without a sha256 hash. Editable, virtual and directory sources are local.
-func uvLockViolations(content string) ([]string, error) {
+// or without a sha256 hash. Editable, virtual and directory sources are exempt
+// only when local confirms the directory is inside the repository.
+func uvLockViolations(content string, local func(string) bool) ([]string, error) {
 	var lock struct {
 		Package []struct {
 			Name   string           `toml:"name"`
@@ -77,13 +77,17 @@ func uvLockViolations(content string) ([]string, error) {
 	}
 	var found []string
 	for _, pkg := range lock.Package {
-		local := false
+		directory, isLocal := "", false
 		for _, kind := range []string{"editable", "virtual", "directory"} {
-			if _, ok := pkg.Source[kind]; ok {
-				local = true
+			if v, ok := pkg.Source[kind]; ok {
+				directory, _ = v.(string)
+				isLocal = true
 			}
 		}
-		if local {
+		if isLocal {
+			if len(pkg.Source) != 1 || !local(directory) {
+				found = append(found, pkg.Name)
+			}
 			continue
 		}
 		ok := pkg.Source["registry"] == "https://pypi.org/simple"
@@ -102,7 +106,6 @@ func uvLockViolations(content string) ([]string, error) {
 			found = append(found, pkg.Name)
 		}
 	}
-	sort.Strings(found)
 	return found, nil
 }
 

@@ -301,16 +301,21 @@ mise exec aqua:betterleaks/betterleaks@1.10.1 -- betterleaks dir --no-banner --v
 
 | ルール | check | 判定 | 不足のときの報告 |
 | --- | --- | --- | --- |
-| `CORE-DEPENDENCY-INTAKE` | `cooldown` | 公開直後の版を解決しない待機期間（npm の `min-release-age`、pnpm の `minimumReleaseAge`、uv の `exclude-newer`） | `warn`。終了コードは変えません |
+| `CORE-DEPENDENCY-INTAKE` | `cooldown` | 公開直後の版を解決しない待機期間（npm 11.10 以上の `min-release-age`、pnpm の strict な `minimumReleaseAge`、uv の `exclude-newer`） | `warn`。終了コードは変えません |
 | `CORE-DEPENDENCY-INTAKE` | `install-scripts` | 依存の install スクリプトの抑止（npm の `ignore-scripts=true`、pnpm 11 以上の既定と `allowBuilds`） | `warn`。終了コードは変えません |
-| `CORE-LOCKFILE-SOURCE` | `source` | lockfile の取得元が公式レジストリで、完全性ハッシュがあること | `fail`。終了コード 1 で終了します |
+| `CORE-LOCKFILE-SOURCE` | `source` | lockfile の取得元が公式レジストリで完全性ハッシュがあり、リポジトリのレジストリ設定が取得先を変えていないこと | `fail`。終了コード 1 で終了します |
 
 - 対象の lockfile がなければ `not_applicable` と報告します。
 - `warn` は適合を意味しません。採用版の更新と同時に利用先の必須チェックが失敗しないよう、不適合にしていないだけです。
   報告の `evidence` に、足りない設定とファイルを表示します。
-- 取得元の検査は、git・URL・tarball を指す依存と、公式以外のレジストリを不適合にします。
+- 待機期間は、設定が実際に働くときだけ合格にします。`min-release-age` を無視する古い npm、
+  strict でない pnpm の既定、`uv.toml` に上書きされた `pyproject.toml`、0 や未来の `exclude-newer` は合格にしません。
+- 取得元の検査は、git・URL・tarball を指す依存、公式以外のレジストリ、リポジトリの外を指すローカル依存、
+  `.npmrc` と `pnpm-workspace.yaml` によるレジストリの変更を不適合にします。
   採用版を上げる前に、`dev-standards check` の `source` が `pass` であることを確認してください。
-- `.npmrc` は認証情報を含むことがあるので、plan の入力には含めず、`check` が 2 つの設定だけを読みます。
+- `.npmrc` と `uv.toml` は認証情報を含むことがあるので、plan の入力には含めず、`check` が必要な設定だけを読みます。
+  報告には、設定の値、URL、解析エラーの本文を載せません。
+- 判定するのはリポジトリ内の設定だけです。利用者や端末の設定、環境変数は判定しません。
 
 設定の例、lockfile・CI・Renovate との関係は[依存の取り込みのルール](guidance/core/dependency-intake.md)、
 取得元の条件は [lockfile の取得元のルール](guidance/core/lockfile-source.md)を参照してください。
