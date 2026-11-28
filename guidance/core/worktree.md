@@ -4,6 +4,8 @@
 作業は `git worktree` か、Orca などのツールが用意する worktree で行う。
 実装を別のエージェントやハーネスに任せず、対話の中で直接編集する場合にも適用する。
 
+<!-- cspell:words worktree -->
+
 ## 作業場所
 
 - 変更を始める前に、作業中のディレクトリが元の checkout か worktree かを確認する。

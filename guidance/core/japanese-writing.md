@@ -1,6 +1,6 @@
 # 日本語の出力に textlint・cspell・yomiyasu を導入する
 
-<!-- cspell:words yomiyasu -->
+<!-- cspell:words yomiyasu textlint -->
 
 日本語の文書や出力を作成・編集するリポジトリでは、textlint、cspell、yomiyasu を導入する。
 共通ルールなどの生成済みファイルを受け取るだけの場合は、導入の対象外とする。
