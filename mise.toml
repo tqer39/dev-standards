@@ -46,7 +46,8 @@ run = "zizmor --offline --min-severity medium .github"
 
 [tasks."security:secrets"]
 # 過去の誤検知を拾わないよう、全履歴ではなく作業ツリーを検査する。
-run = "betterleaks dir --no-banner ."
+# 値をログに残さないよう伏せたうえで、検出したファイルと行を表示する。
+run = "betterleaks dir --no-banner --verbose --redact ."
 
 [tasks."session:verify"]
 run = "go run ./cmd/dev-standards session-verify"

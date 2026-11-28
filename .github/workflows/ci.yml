@@ -57,7 +57,9 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: mise run security:actions
-      - run: mise run security:secrets
+      # ワークフローの指摘があっても、secret の検査結果を同じ実行で得る。
+      - if: ${{ !cancelled() }}
+        run: mise run security:secrets
   workflow-result:
     if: always()
     needs: [check, acceptance, security]
