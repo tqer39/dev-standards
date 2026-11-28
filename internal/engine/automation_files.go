@@ -383,9 +383,17 @@ permissions:
   contents: read
 jobs:
   workflow-result:
+    # A job skipped by a failed need would satisfy a required check, so this job
+    # always runs and fails on the supply-chain result itself.
+    needs: [supply-chain]
+    if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - name: Require the supply-chain job
+        env:
+          SUPPLY_CHAIN: ${{ needs.supply-chain.result }}
+        run: test "$SUPPLY_CHAIN" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -414,4 +422,30 @@ jobs:
       - run: gofmt -l . > /tmp/formatting && test ! -s /tmp/formatting
       - run: mise run test
       - run: mise run build
+` + supplyChainJob
+
+// Runs before the project's tools and dependencies are installed. Both tools are
+// pinned in the command so the project's mise.toml stays untouched; mise installs
+// only the named tool. The cache is off so this job cannot seed the main job's
+// tool cache with a partial install.
+// zizmor audits only the workflows generated here: existing project workflows
+// may still have findings, and auditing them would break CI on upgrade.
+// betterleaks reads the project's own .betterleaks.toml only with the auto-load flag.
+const supplyChainJob = `  supply-chain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          version: 2026.10.24
+          install: false
+          cache: false
+      - name: Audit generated workflows
+        run: mise exec aqua:zizmorcore/zizmor@1.32.0 -- zizmor --offline --min-severity medium .github/workflows/dev-standards.yml ` + versionLagWorkflowPath + `
+      - name: Scan the working tree for secrets
+        if: ${{ !cancelled() }}
+        run: mise exec aqua:betterleaks/betterleaks@1.10.1 -- betterleaks dir --no-banner --verbose --redact --unsafe-auto-load-config .
 `
