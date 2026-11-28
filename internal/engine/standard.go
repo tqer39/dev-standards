@@ -21,7 +21,7 @@ func (t *Tree) AppliedStandard() (*AppliedStandard, error) {
 	}
 	var lock Lock
 	if err := strictJSON(s.Content, &lock); err != nil {
-		return nil, fmt.Errorf("lock.json: %w", err)
+		return nil, inputError(".standards/lock.json", s.Content, err)
 	}
 	if lock.SchemaVersion != 1 || lock.Repository != bundle.Repository || !pinnedGo(lock.Version) || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(lock.Bundle) {
 		return nil, fmt.Errorf("lock.json has an invalid standard identity")

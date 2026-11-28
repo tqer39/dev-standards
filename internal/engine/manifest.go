@@ -116,7 +116,7 @@ func cleanLocalEditorFor(s, profile string) (string, error) {
 	var lines []string
 	section := ""
 	goIndent := "tab"
-	for _, line := range strings.Split(normalized(s), "\n") {
+	for i, line := range strings.Split(normalized(s), "\n") {
 		v := strings.TrimSpace(line)
 		if v == "" || strings.HasPrefix(v, "#") || strings.HasPrefix(v, ";") {
 			lines = append(lines, line)
@@ -155,7 +155,7 @@ func cleanLocalEditorFor(s, profile string) (string, error) {
 				return "", fmt.Errorf("Go indentation must use tabs; move other language overrides into specific sections")
 			}
 		} else {
-			return "", fmt.Errorf("invalid EditorConfig line: %s", v)
+			return "", fmt.Errorf("invalid EditorConfig line %d", i+1)
 		}
 		lines = append(lines, line)
 	}

@@ -7,7 +7,7 @@ func (t *Tree) claudeFiles(p *Plan, desired map[string]Snapshot) error {
 	var previous State
 	if p.Inputs[".standards/state.json"].Exists {
 		if err := strictJSON(p.Inputs[".standards/state.json"].Content, &previous); err != nil {
-			return err
+			return inputError(".standards/state.json", p.Inputs[".standards/state.json"].Content, err)
 		}
 	}
 	if !previous.Files[claudeRulePath].Exists {
