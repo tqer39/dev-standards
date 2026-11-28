@@ -15,7 +15,7 @@ TypeScript のソースと `tsconfig.json` の両方を持つリポジトリを�
 - tsrs は mise の npm ツールとして版を固定し、mise のタスクとして実行する。
   `latest` や範囲指定は使わない。
 - タスクだけにツールを指定し、プロジェクト全体の `[tools]` や `package.json` の依存には追加しない。
-  `npm ci`、ビルド、既存の型チェックが使う TypeScript の版を変えないためである。
+  `npm ci`、ビルド、既存の型チェックが使う TypeScript の版は変えない。
 - 共通の mise 設定を生成している利用先は、`.standards/mise.project.toml` などの正本を編集し、
   変更計画を確認して再生成する。
 
