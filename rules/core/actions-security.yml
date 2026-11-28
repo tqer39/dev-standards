@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "CORE-ACTIONS-SECURITY",
-  "revision": 1,
+  "revision": 2,
   "status": "active",
   "title": "GitHub Actions のサプライチェーン攻撃対策を導入する",
   "rationale": "依存するアクションや PR の内容が改ざんされても、リポジトリの権限と secret に被害が及ばないようにする。",
@@ -29,10 +29,11 @@
   "remediation": {
     "mode": "assisted",
     "handler": "workflow",
-    "instructions": "ワークフローを説明の一覧と照合し、不足する対策を導入する。check はこの内容を判定しないため、成功だけで適合と扱わない。"
+    "instructions": "zizmor が判定する項目は、共通 CI の supply-chain ジョブまたは zizmor --offline --min-severity medium の指摘に従って直す。人が確認する項目と、共通 CI が検査しない利用先のワークフローは、説明の一覧と差分を照合して不足する対策を導入する。check はこの内容を判定しないため、check と supply-chain ジョブの成功だけで適合と扱わない。"
   },
   "guidance": "guidance/core/actions-security.md",
   "references": [
-    "https://docs.github.com/en/actions/reference/security/secure-use"
+    "https://docs.github.com/en/actions/reference/security/secure-use",
+    "https://docs.zizmor.sh/audits/"
   ]
 }
