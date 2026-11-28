@@ -9,7 +9,7 @@ Renovate の `minimumReleaseAge` は、Renovate が作る更新にしか効か�
 
 ## check が判定する項目
 
-`check` は、plan の入力にある lockfile ごとに、同じディレクトリの設定を読んで判定する。
+`check` は、plan の入力にある lockfile を 1 つずつ判定する。判定には、同じディレクトリの設定を読む。
 設定ファイルは dev-standards が生成しないので、利用先が自分で書く。
 
 | lockfile | 待機期間（`cooldown`） | install スクリプト（`install-scripts`） |
@@ -33,7 +33,7 @@ pnpm:
 
 - pnpm の版は、`package.json` の `packageManager`、なければ `.standards/mise.project.toml` の `tools.pnpm` から読む。
 - `pnpm-workspace.yaml` は、lockfile のディレクトリから上にたどって最初に見つかったものを読む。
-- pnpm 11 以上は `minimumReleaseAge` の既定が 1440 分（1 日）だが、既定の待機は strict ではない。
+- pnpm 11 以上では、`minimumReleaseAge` の既定が 1440 分（1 日）になる。ただし、既定の待機は strict にならない。
   条件を満たす版がないと、待機期間の内側の版を取り込む。このため、既定のままでは合格にしない。
 - `minimumReleaseAge` を明示すると `minimumReleaseAgeStrict` の既定が `true` になり、満たす版がなければ失敗する。
   既定の 1 日のまま合格にするには、`minimumReleaseAgeStrict: true` を書く。
