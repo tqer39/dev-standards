@@ -33,7 +33,7 @@ func validateNodeInputs(p *Plan, c Component) error {
 		Scripts    map[string]string `json:"scripts"`
 	}
 	if err := json.Unmarshal([]byte(project.Content), &pkg); err != nil {
-		return fmt.Errorf("package.json: %w", err)
+		return inputError(componentFile(c, "package.json"), project.Content, err)
 	}
 	if pkg.Workspaces != nil {
 		return fmt.Errorf("node-npm supports one package, without npm workspaces")
@@ -47,7 +47,7 @@ func validateNodeInputs(p *Plan, c Component) error {
 		LockfileVersion int `json:"lockfileVersion"`
 	}
 	if err := json.Unmarshal([]byte(lock.Content), &parsedLock); err != nil {
-		return fmt.Errorf("package-lock.json: %w", err)
+		return inputError(componentFile(c, "package-lock.json"), lock.Content, err)
 	}
 	if parsedLock.LockfileVersion < 2 {
 		return fmt.Errorf("package-lock.json must use lockfileVersion 2 or later")

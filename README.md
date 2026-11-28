@@ -201,6 +201,7 @@ dev-standards verify
 
 `check` は設定の整合性を調べる処理です。コードの lint やテストを実行したことにはしません。
 `verify` は設定を確認したうえで、mise の lint、整形確認、test、build を実行します。
+開始時のファイルの状態は設定の確認より前に記録し、確認やタスクの実行中にファイルが変わった場合は検証記録を作りません。
 言語選定の妥当性のレビューと、新規環境での bootstrap は別の証拠が必要なため、
 結果をそれぞれ `review_required`、`not_run` として明示します。
 
@@ -316,6 +317,11 @@ mise exec aqua:betterleaks/betterleaks@1.10.1 -- betterleaks dir --no-banner --v
 - `.npmrc` と `uv.toml` は認証情報を含むことがあるので、plan の入力には含めず、`check` が必要な設定だけを読みます。
   報告には、設定の値、URL、解析エラーの本文を載せません。
 - 判定するのはリポジトリ内の設定だけです。利用者や端末の設定、環境変数は判定しません。
+- plan が受け付けない入力は、`check` の結果にならず、設定不正として終了コード 2 で止まります。
+  解析できない `package.json`・`package-lock.json`・`pyproject.toml`・`uv.lock`、
+  `node-npm` の `lockfileVersion` 1 の `package-lock.json` が該当します。
+  生成物との一致を判定する前提が欠けていて、`plan`・`apply` も同じ入力で同じように止まるためです。
+  plan が中身を検証しない `mise-project` では、同じ lockfile を `check` が `source` の `fail`（終了コード 1）として報告します。
 
 設定の例、lockfile・CI・Renovate との関係は[依存の取り込みのルール](guidance/core/dependency-intake.md)、
 取得元の条件は [lockfile の取得元のルール](guidance/core/lockfile-source.md)を参照してください。
@@ -477,6 +483,9 @@ dev-standards check
 残った `.dev-standards-apply.lock` は、実行中の処理がないことを確認してから取り除き、再計画してください。
 
 終了コードは `0` が対象処理の成功、`1` が差分・不適合、`2` が設定不正・衝突・実行不能です。
+入力を解析できないときのエラーには、ファイル名と、分かる場合は行番号だけを載せます。
+lockfile や設定の値、URL、パーサーのエラーの本文は、エラーにも、`check` と `verify` の報告にも、feedback の記録にも載せません。
+`plan` が出力する計画は、これまでどおり入力の全文を含みます。
 構造検証に成功しただけで、未実行の検査も含めて完全適合とは表示しません。
 
 検証記録は、同じリポジトリ内の追跡対象の通常ファイルを指すシンボリックリンクも扱います。

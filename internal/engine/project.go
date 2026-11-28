@@ -17,7 +17,7 @@ func validateMiseProject(cfg map[string]any) error {
 	for name, value := range tools {
 		version, ok := value.(string)
 		if !ok || version == "" || version == "latest" || version == "system" || version == "lts" || strings.ContainsAny(version, "*<>=^~ ") {
-			return fmt.Errorf("tools.%s must be pinned explicitly", name)
+			return fmt.Errorf("tools.%s must be pinned explicitly", safeKey(name))
 		}
 	}
 	for _, name := range []string{"node", "python", "go", "uv", "pnpm"} {

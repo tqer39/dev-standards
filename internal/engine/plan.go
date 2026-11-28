@@ -89,7 +89,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		}
 		if req.CompanionsPath != "" {
 			if err := bundle.Decode([]byte(p.Inputs[req.CompanionsPath].Content), "companions", &m.Companions); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("companions: %w", err)
 			}
 			for _, c := range m.Companions {
 				if c.Profile == "swift" {
@@ -281,7 +281,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	if upgrading {
 		var previous Lock
 		if err := strictJSON(p.Inputs[".standards/lock.json"].Content, &previous); err != nil {
-			return nil, err
+			return nil, inputError(".standards/lock.json", p.Inputs[".standards/lock.json"].Content, err)
 		}
 		if sum(p.Inputs[vendorPath].Content) != previous.GitignoreSHA256 {
 			return nil, fmt.Errorf("previous gitignore snapshot is not authentic")
@@ -300,7 +300,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		Tools map[string]string `toml:"tools"`
 	}
 	if _, err := toml.Decode(rootMise, &parsedMise); err != nil {
-		return nil, err
+		return nil, inputError("mise.toml", rootMise, err)
 	}
 	for _, c := range m.Companions {
 		if c.Profile == "go" && !pinnedGo(parsedMise.Tools["go"]) {
@@ -321,7 +321,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	if !initial {
 		var current Lock
 		if err := strictJSON(p.Inputs[".standards/lock.json"].Content, &current); err != nil {
-			return nil, fmt.Errorf("lock.json: %w", err)
+			return nil, inputError(".standards/lock.json", p.Inputs[".standards/lock.json"].Content, err)
 		}
 		if upgrading && (current.Repository != bundle.Repository || current.SchemaVersion != 1 || !nonDowngrade(current.Version, bundle.Version)) {
 			return nil, fmt.Errorf("untrusted previous lock")
@@ -392,11 +392,11 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 	var state State
 	if !initial {
 		if err := strictJSON(p.Inputs[".standards/state.json"].Content, &state); err != nil {
-			return nil, err
+			return nil, inputError(".standards/state.json", p.Inputs[".standards/state.json"].Content, err)
 		}
 		var previousLock Lock
 		if err := strictJSON(p.Inputs[".standards/lock.json"].Content, &previousLock); err != nil {
-			return nil, err
+			return nil, inputError(".standards/lock.json", p.Inputs[".standards/lock.json"].Content, err)
 		}
 		if state.Bundle != previousLock.Bundle {
 			return nil, fmt.Errorf("previous state and lock do not match")
@@ -423,7 +423,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 		for name, baseline := range state.Files {
 			_, removedTarget := targetOutputs[name]
 			if !contains(managedPaths, name) && name != claudeRulePath && !removedTarget {
-				return nil, fmt.Errorf("unknown managed path in previous state: %s", name)
+				return nil, fmt.Errorf("unknown managed path in previous state: %s", safePath(name))
 			}
 			ok := baseline.Exists
 			if !ok {
@@ -507,7 +507,7 @@ func (t *Tree) Plan(req Request) (*Plan, error) {
 func validateProjectTasks(s string) error {
 	var tasks map[string]any
 	if _, err := toml.Decode(s, &tasks); err != nil {
-		return fmt.Errorf("project tasks: %w", err)
+		return inputError(".standards/tasks.project.toml", s, err)
 	}
 	for _, name := range reservedTasks {
 		if _, ok := tasks[name]; ok {
@@ -521,7 +521,7 @@ func renderMiseFor(local, profileID string) (string, error) {
 	var cfg map[string]any
 	meta, err := toml.Decode(local, &cfg)
 	if err != nil {
-		return "", fmt.Errorf("mise project configuration: %w", err)
+		return "", inputError("mise project configuration", local, err)
 	}
 	if meta.IsDefined("task_config") {
 		return "", fmt.Errorf("existing task_config needs manual migration; its include order will not be overwritten")

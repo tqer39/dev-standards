@@ -45,14 +45,14 @@ func validatePythonInputs(p *Plan, c Component) error {
 		} `toml:"tool"`
 	}
 	if _, err := toml.Decode(project.Content, &cfg); err != nil {
-		return fmt.Errorf("pyproject.toml: %w", err)
+		return inputError(componentFile(c, "pyproject.toml"), project.Content, err)
 	}
 	if cfg.Project.Name == "" || cfg.Build.Backend == "" || cfg.Tool.UV.Workspace != nil {
 		return fmt.Errorf("python-uv supports one buildable package, without a uv workspace")
 	}
 	var parsedLock map[string]any
 	if _, err := toml.Decode(lock.Content, &parsedLock); err != nil {
-		return fmt.Errorf("uv.lock: %w", err)
+		return inputError(componentFile(c, "uv.lock"), lock.Content, err)
 	}
 	if _, ok := parsedLock["version"].(int64); !ok {
 		return fmt.Errorf("uv.lock must declare an integer version")

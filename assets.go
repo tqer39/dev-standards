@@ -10,14 +10,16 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"regexp"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"go.yaml.in/yaml/v3"
 )
 
-const Version = "0.4.36"
+const Version = "0.4.37"
 const Repository = "tqer39/dev-standards"
 
 //go:embed schemas rules guidance profiles templates
@@ -49,6 +51,11 @@ func Digest() string {
 
 // Decode accepts exactly one JSON-compatible YAML document without aliases,
 // explicit tags, merge keys or duplicate keys. JSON is a subset of this format.
+//
+// Its errors never quote the document. Parser and schema messages repeat the
+// keys and values around a failure, and callers print these errors to stdout,
+// stderr, hook output and saved feedback. An error names a line, or a location
+// made of plain keys and the schema keyword that failed.
 func Decode(data []byte, schemaName string, out any) error {
 	if len(data) > 1<<20 {
 		return fmt.Errorf("document exceeds 1 MiB")
@@ -56,7 +63,7 @@ func Decode(data []byte, schemaName string, out any) error {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var n yaml.Node
 	if err := dec.Decode(&n); err != nil {
-		return err
+		return yamlError(err)
 	}
 	count := 0
 	if err := nodeCheck(&n, 0, &count); err != nil {
@@ -68,14 +75,14 @@ func Decode(data []byte, schemaName string, out any) error {
 	}
 	var value any
 	if err := n.Decode(&value); err != nil {
-		return err
+		return yamlError(err)
 	}
 	normalized, err := json.Marshal(value)
 	if err != nil {
-		return fmt.Errorf("JSON-compatible values required: %w", err)
+		return fmt.Errorf("JSON-compatible values required")
 	}
 	if err := json.Unmarshal(normalized, &value); err != nil {
-		return err
+		return fmt.Errorf("JSON-compatible values required")
 	}
 	if schemaName != "" {
 		validator, err := schema(schemaName)
@@ -83,13 +90,57 @@ func Decode(data []byte, schemaName string, out any) error {
 			return err
 		}
 		if err := validator.Validate(value); err != nil {
-			return err
+			return schemaError(err)
 		}
 	}
-	if out != nil {
-		return json.Unmarshal(normalized, out)
+	if out != nil && json.Unmarshal(normalized, out) != nil {
+		return fmt.Errorf("document does not have the expected structure")
 	}
 	return nil
+}
+
+var (
+	yamlErrorLine = regexp.MustCompile(`line (\d{1,9})`)
+	plainKey      = regexp.MustCompile(`^(?:[A-Za-z][A-Za-z0-9]{0,39}|[0-9]{1,6})$`)
+)
+
+// yamlError keeps only the line number of a YAML error.
+func yamlError(err error) error {
+	if m := yamlErrorLine.FindStringSubmatch(err.Error()); m != nil {
+		return fmt.Errorf("invalid YAML at line %s", m[1])
+	}
+	return fmt.Errorf("invalid YAML")
+}
+
+// schemaError reports where validation failed and which schema keyword
+// rejected it. The keyword comes from the schema. The location comes from the
+// document, so a key is shown only when it looks like a plain identifier or an
+// index.
+func schemaError(err error) error {
+	v, ok := err.(*jsonschema.ValidationError)
+	if !ok {
+		return fmt.Errorf("document does not match its schema")
+	}
+	for len(v.Causes) > 0 {
+		v = v.Causes[0]
+	}
+	location := ""
+	for _, key := range v.InstanceLocation {
+		if !plainKey.MatchString(key) {
+			key = "(key withheld)"
+		}
+		location += "/" + key
+	}
+	if location == "" {
+		location = "the top level"
+	}
+	keyword := ""
+	if v.ErrorKind != nil {
+		if path := v.ErrorKind.KeywordPath(); len(path) > 0 {
+			keyword = " (" + strings.Join(path, "/") + ")"
+		}
+	}
+	return fmt.Errorf("document does not match its schema at %s%s", location, keyword)
 }
 
 func nodeCheck(n *yaml.Node, depth int, count *int) error {
@@ -98,14 +149,14 @@ func nodeCheck(n *yaml.Node, depth int, count *int) error {
 		return fmt.Errorf("document is too complex")
 	}
 	if n.Anchor != "" || n.Alias != nil || n.Kind == yaml.AliasNode || n.Style&yaml.TaggedStyle != 0 {
-		return fmt.Errorf("anchors, aliases and explicit tags are not allowed")
+		return fmt.Errorf("anchors, aliases and explicit tags are not allowed (line %d)", n.Line)
 	}
 	if n.Kind == yaml.MappingNode {
 		seen := map[string]bool{}
 		for i := 0; i < len(n.Content); i += 2 {
 			key := n.Content[i]
 			if key.Kind != yaml.ScalarNode || key.Tag != "!!str" || key.Value == "<<" || seen[key.Value] {
-				return fmt.Errorf("mapping keys must be unique strings: %q", key.Value)
+				return fmt.Errorf("mapping keys must be unique strings (line %d)", key.Line)
 			}
 			seen[key.Value] = true
 		}

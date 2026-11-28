@@ -120,7 +120,7 @@ func hookFile(p *Plan, desired map[string]Snapshot, previous State, target, sour
 		desired[source] = raw
 	}
 	if err := json.Unmarshal([]byte(raw.Content), &settings); err != nil {
-		return fmt.Errorf("hook source: %w", err)
+		return inputError("hook source "+source, raw.Content, err)
 	}
 	events, ok := settings["hooks"].(map[string]any)
 	if !ok {
@@ -188,7 +188,7 @@ func (t *Tree) automationFiles(p *Plan, desired map[string]Snapshot, m Manifest)
 	var previous State
 	if p.Inputs[".standards/state.json"].Exists {
 		if err := strictJSON(p.Inputs[".standards/state.json"].Content, &previous); err != nil {
-			return err
+			return inputError(".standards/state.json", p.Inputs[".standards/state.json"].Content, err)
 		}
 	}
 	if m.AI.Instructions == "rulesync" {

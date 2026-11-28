@@ -40,7 +40,8 @@ func ReadPlan(path string) (*Plan, error) {
 	}
 	var p Plan
 	if err := strictJSON(string(b), &p); err != nil {
-		return nil, err
+		// 計画は入力の全文を含むので、解析エラーの本文を載せない。
+		return nil, inputError("plan", string(b), err)
 	}
 	return &p, nil
 }

@@ -250,3 +250,61 @@ func TestNodeCLIOnboardWithRulesync(t *testing.T) {
 		t.Fatal("Node onboard/sync is not idempotent")
 	}
 }
+
+// 壊れた入力の値は、どのコマンドの標準出力・標準エラーにも出さない。値は合成したもので、本物ではない。
+func TestCLIErrorsNeverQuoteBrokenInputs(t *testing.T) {
+	const marker = "fixtureCredentialMarker"
+	target := t.TempDir()
+	if b, err := exec.Command("git", "-C", target, "init", "--quiet").CombinedOutput(); err != nil {
+		t.Fatalf("%s %v", b, err)
+	}
+	put := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(target, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("pyproject.toml", "[project]\nname='sample'\n[build-system]\nbuild-backend='hatchling.build'\n")
+	put("uv.lock", "version=1\n")
+	put("mise.toml", "[tools]\npython='3.13.0'\nuv='0.11.32'\n")
+	put("decision.md", languageRecord)
+	invoke := func(want int, args ...string) string {
+		t.Helper()
+		var out, log bytes.Buffer
+		if got := run(append(args, "--repo", target), &out, &log); got != want {
+			t.Fatalf("%v: got %d want %d: %s", args, got, want, log.String())
+		}
+		return out.String() + log.String()
+	}
+	planPath := filepath.Join(t.TempDir(), "plan.json")
+	invoke(1, "adopt", "--profile", "python-uv", "--component-path", ".", "--decision", "decision.md", "--output", planPath)
+	invoke(0, "apply", "--plan", planPath)
+	invoke(0, "check")
+
+	broken := map[string]string{
+		"uv.lock":        "version = 1\n[[package]]\nname = \"a\"\nsource = { registry = \"https://user:" + marker + "@example.com/simple\nsdist = [" + marker,
+		"pyproject.toml": "[project]\nname = \"https://user:" + marker + "@example.com/simple\n",
+	}
+	for name, content := range broken {
+		original, err := os.ReadFile(filepath.Join(target, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		put(name, content)
+		for _, args := range [][]string{{"check"}, {"verify"}, {"plan"}, {"plan", "--upgrade"}, {"adopt", "--profile", "python-uv", "--component-path", ".", "--decision", "decision.md"}} {
+			text := invoke(2, args...)
+			if strings.Contains(text, marker) || strings.Contains(text, "example.com") {
+				t.Fatalf("%v quotes the broken %s: %s", args, name, text)
+			}
+			if args[0] != "adopt" && !strings.Contains(text, name+" cannot be parsed (line ") {
+				t.Fatalf("%v lost where %s failed: %s", args, name, text)
+			}
+		}
+		put(name, string(original))
+	}
+	// 保存した計画は入力の全文を含むので、壊れた計画のエラーにも本文を出さない。
+	put("edited-plan.json", "{\"inputs\": {\"uv.lock\": \"https://user:"+marker+"@example.com/simple\"")
+	if text := invoke(2, "apply", "--plan", filepath.Join(target, "edited-plan.json")); strings.Contains(text, marker) || strings.Contains(text, "example.com") {
+		t.Fatalf("apply quotes the broken plan: %s", text)
+	}
+}

@@ -21,7 +21,7 @@ func (t *Tree) Check() (Report, error) {
 	}
 	var manifest Manifest
 	if err := bundle.Decode([]byte(p.Inputs[".standards/repository.yml"].Content), "repository", &manifest); err != nil {
-		return r, err
+		return r, fmt.Errorf("repository.yml: %w", err)
 	}
 	component := manifest.Components[0].Name
 	r.Changes = p.Changes
@@ -75,13 +75,31 @@ func (t *Tree) Check() (Report, error) {
 // Verify executes the repository tasks explicitly, without claiming a review
 // of the language decision or a clean-machine bootstrap from static evidence.
 func (t *Tree) Verify(log io.Writer) (Report, error) {
+	return t.verify(nil, func(task string) error {
+		cmd := exec.Command("mise", "run", task)
+		cmd.Dir = t.Root
+		cmd.Stdout = log
+		cmd.Stderr = log
+		return cmd.Run()
+	})
+}
+
+// The receipt vouches for the tree that Check judged, so the starting
+// fingerprint is taken before Check reads anything. An edit made while Check
+// or the tasks run then differs from the fingerprint WriteReceipt takes at the
+// end. A fingerprint error is reported after the result of Check, which says
+// more about a broken tree.
+func (t *Tree) verify(afterCheck func(), run func(task string) error) (Report, error) {
+	fingerprint, fingerprintErr := t.Fingerprint()
 	r, err := t.Check()
 	if err != nil {
 		return r, err
 	}
-	fingerprint, err := t.Fingerprint()
-	if err != nil {
-		return r, err
+	if fingerprintErr != nil {
+		return r, fingerprintErr
+	}
+	if afterCheck != nil {
+		afterCheck()
 	}
 	var manifest Manifest
 	snapshot, err := t.Read(".standards/repository.yml")
@@ -89,7 +107,7 @@ func (t *Tree) Verify(log io.Writer) (Report, error) {
 		return r, err
 	}
 	if err := bundle.Decode([]byte(snapshot.Content), "repository", &manifest); err != nil {
-		return r, err
+		return r, fmt.Errorf("repository.yml: %w", err)
 	}
 	if err := companionHostSupported(manifest); err != nil {
 		return r, err
@@ -100,10 +118,6 @@ func (t *Tree) Verify(log io.Writer) (Report, error) {
 		tasks = append(tasks, c.VerifyTask)
 	}
 	for _, task := range tasks {
-		cmd := exec.Command("mise", "run", task)
-		cmd.Dir = t.Root
-		cmd.Stdout = log
-		cmd.Stderr = log
 		result := Result{"CORE-LINT", task, r.Results[0].Component, "pass", "mise run " + task}
 		for _, c := range manifest.Companions {
 			if task == c.VerifyTask {
@@ -113,7 +127,7 @@ func (t *Tree) Verify(log io.Writer) (Report, error) {
 		if task == "format:check" {
 			result.Rule = "CORE-FORMAT"
 		}
-		if err := cmd.Run(); err != nil {
+		if err := run(task); err != nil {
 			result.Status = "fail"
 			result.Evidence += " failed: " + err.Error()
 			r.Results = append(r.Results, result)
@@ -148,7 +162,7 @@ func (t *Tree) FormatCheck() ([]string, error) {
 		}
 		formatted, err := format.Source([]byte(s.Content))
 		if err != nil {
-			return fmt.Errorf("%s: %w", p, err)
+			return inputError(p, s.Content, err)
 		}
 		if !bytes.Equal(formatted, []byte(s.Content)) {
 			changed = append(changed, p)

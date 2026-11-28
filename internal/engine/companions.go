@@ -53,7 +53,7 @@ func validateCompanions(m Manifest) error {
 func validateCompanionTasks(m Manifest, source string) error {
 	var tasks map[string]any
 	if _, err := toml.Decode(source, &tasks); err != nil {
-		return err
+		return inputError(".standards/tasks.project.toml", source, err)
 	}
 	for _, c := range m.Companions {
 		task, ok := tasks[c.VerifyTask].(map[string]any)
