@@ -16,6 +16,7 @@ manifest との不一致としては検出されない。`check` が lockfile �
 
 - git、URL、tarball を指す依存は不適合になる。公式レジストリに公開された版へ置き換える。
 - `package-lock.json` は `lockfileVersion` 2 以上が必要である。
+  `packages` がなく旧形式の `dependencies` だけがある場合は、判定できないので不適合にする。
 - `pnpm-lock.yaml` が複数の文書に分かれている場合は、すべての文書を読む。
 - `node-npm` と `python-uv` はコンポーネントの lockfile を、`mise-project` はリポジトリ内のすべての lockfile を対象にする。
   対象の lockfile がなければ `not_applicable` と報告する。
@@ -37,6 +38,8 @@ npm は `resolved` の `registry.npmjs.org` を設定中のレジストリに読
   文字列にならない引用、セクション、配列（`registry[]`）、キーの中の `${NAME}`、
   `registry` を含む未知のキー（`replace-registry-host` など）が該当する。
   `//host/:_authToken` のような認証情報のキーは対象にしない。
+- pnpm では、lockfile のディレクトリからリポジトリのルートまでの `.npmrc` と、
+  上にたどって最初に見つかった `pnpm-workspace.yaml` を読む。lockfile を分けたワークスペースでは、上位の設定が効くためである。
 - 安全に読めない `.npmrc`（リポジトリの外を指すシンボリックリンクなど）と、解析できない `pnpm-workspace.yaml` は、
   実際のレジストリが分からないので不適合にする。
 - uv は `uv.lock` に記録した URL から取得するので、uv の index の設定は読まない。
@@ -46,12 +49,13 @@ npm は `resolved` の `registry.npmjs.org` を設定中のレジストリに読
 ## リポジトリ内のディレクトリを指す依存
 
 取得を伴わない依存は、lockfile の位置から解決した先が、リポジトリ内の通常のディレクトリである場合だけ対象外にする。
-npm の `link` とその指す先、pnpm の `directory`、uv の `editable`・`virtual`・`directory` が該当する。
+npm の `link` とその指す先、pnpm の `directory` と importer の `link:`、uv の `editable`・`virtual`・`directory` が該当する。
 次の場合は不適合にする。
 
 - 親ディレクトリの参照でリポジトリの外に出る。
 - 絶対パスである。
 - 途中にシンボリックリンクがある。
+- 先頭より後に `..` がある（`alias/../shared` など。手前の要素を確かめられない）。
 - 存在しない、またはディレクトリでない。
 
 npm の同梱（`inBundle`）の項目は、親のパッケージの tarball に含まれるので対象外にする。

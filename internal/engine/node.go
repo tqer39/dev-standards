@@ -68,6 +68,7 @@ func npmLockViolations(content string, local func(string) bool) ([]string, error
 			Link      bool   `json:"link"`
 			InBundle  bool   `json:"inBundle"`
 		} `json:"packages"`
+		Dependencies map[string]json.RawMessage `json:"dependencies"`
 	}
 	if err := json.Unmarshal([]byte(content), &lock); err != nil {
 		return nil, err
@@ -75,6 +76,10 @@ func npmLockViolations(content string, local func(string) bool) ([]string, error
 	if lock.LockfileVersion < 2 {
 		// 版 1 には packages がなく、空の一覧を合格と誤って報告してしまう。
 		return nil, fmt.Errorf("lockfileVersion 2 or later is required")
+	}
+	if lock.Packages == nil && len(lock.Dependencies) > 0 {
+		// packages がないと、npm は旧形式の dependencies から依存を復元する。
+		return nil, fmt.Errorf("packages is required beside the legacy dependencies")
 	}
 	var found []string
 	for name, pkg := range lock.Packages {

@@ -18,6 +18,7 @@ Renovate の `minimumReleaseAge` は Renovate が作る更新にしか効かな�
 
 npm:
 
+- 同じ `.npmrc` に `before` があると、npm は `min-release-age` より `before` を優先する。この場合は合格にしない。
 - `min-release-age` は npm 11.10.0 で追加された。それより前の npm は設定を無視するので、設定があっても合格にしない。
 - npm の版は、mise が導入するものを根拠にする。`.standards/mise.project.toml` の `tools.npm`、
   なければ `tools.node` に同梱の npm で判断する。
@@ -29,6 +30,7 @@ npm:
 pnpm:
 
 - pnpm の版は、`package.json` の `packageManager`、なければ `.standards/mise.project.toml` の `tools.pnpm` から読む。
+- `pnpm-workspace.yaml` は、lockfile のディレクトリから上にたどって最初に見つかったものを読む。
 - pnpm 11 以上は `minimumReleaseAge` の既定が 1440 分（1 日）だが、既定の待機は strict ではない。
   条件を満たす版がないと、待機期間の内側の版を取り込む。このため、既定のままでは合格にしない。
 - `minimumReleaseAge` を明示すると `minimumReleaseAgeStrict` の既定が `true` になり、満たす版がなければ失敗する。
@@ -85,7 +87,8 @@ exclude-newer = "7 days"
 
 - リポジトリの `.npmrc` に認証情報を書かない。
 - `ignore-scripts=true` にすると、依存の `postinstall` などは実行されない。
-  ネイティブモジュールなどで必要な場合は、`npm rebuild <package>` を明示して実行する。
+  ネイティブモジュールなどで必要な場合は、対象を限って `npm rebuild <package> --ignore-scripts=false` を実行する。
+  `.npmrc` の設定は `npm rebuild` にも効くので、このコマンドだけで解除する。
   `npm run` や `npm test` で指定したスクリプトは実行されるが、その `pre`・`post` スクリプトは実行されない。
 
 ## lockfile と CI との関係
@@ -93,8 +96,9 @@ exclude-newer = "7 days"
 - npm: `min-release-age` は新しく解決する版にだけ効く。`npm ci` は `package-lock.json` のとおりに導入するので、影響を受けない。
 - uv: `exclude-newer` を追加・変更したら、`uv lock` を実行して `uv.lock` を更新する。
   更新しないと、`uv sync --locked` と `uv run --locked` は lock が古いとして失敗する。
-  相対指定（`"7 days"`）では、`uv.lock` の `[options]` に期間（`exclude-newer-span`）が記録され、時刻は記録されない。
-  このため、日付が変わっても `--locked` は失敗せず、`uv lock` をやり直しても差分は出ない。
+  相対指定（`"7 days"`）では、uv 0.11.32 と 0.13.8 は `uv.lock` の `[options]` に期間（`exclude-newer-span = "P7D"`）を記録する。
+  併記される `exclude-newer` は互換のための固定値（`0001-01-01T00:00:00Z`）で、解決した時刻ではない。
+  この 2 つの版では、日付が変わっても `--locked` は失敗せず、`uv lock` をやり直しても差分は出ない。
 - pnpm: 現在の pnpm は、lockfile を読み込むときにも `minimumReleaseAge` を lockfile の各項目に適用して検証する。
   `trustLockfile: true` はこの検証を省くので、設定しない。
 

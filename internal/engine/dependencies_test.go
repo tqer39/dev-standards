@@ -47,7 +47,11 @@ const nodeTools = "[tools]\nnode = \"24.21.0\"\n"
 const marker = "fixtureCredentialMarker"
 
 func TestLockfileSourceViolations(t *testing.T) {
-	local := func(rel string) bool { return rel == "." || rel == "packages/local" || rel == "local" }
+	inside := map[string]bool{".": true, "packages": true, "packages/local": true, "local": true}
+	local := func(rel string) bool {
+		p, ok := repositoryPath(".", rel)
+		return ok && inside[p]
+	}
 	npm := func(entry string) string {
 		return `{"lockfileVersion":3,"packages":{"node_modules/a":` + entry + `}}`
 	}
@@ -61,27 +65,34 @@ func TestLockfileSourceViolations(t *testing.T) {
 		want    []string
 		invalid bool
 	}{
-		"npm ok":             {npmLockViolations, npmLockOK, nil, false},
-		"npm git":            {npmLockViolations, npm(`{"resolved":"git+ssh://git@github.com/o/a.git#0123","integrity":"` + sha512 + `"}`), []string{"node_modules/a"}, false},
-		"npm other host":     {npmLockViolations, npm(`{"resolved":"https://registry.npmjs.org.example.com/a.tgz","integrity":"` + sha512 + `"}`), []string{"node_modules/a"}, false},
-		"npm http":           {npmLockViolations, npm(`{"resolved":"http://registry.npmjs.org/a/-/a-1.0.0.tgz","integrity":"` + sha512 + `"}`), []string{"node_modules/a"}, false},
-		"npm local tarball":  {npmLockViolations, npm(`{"resolved":"file:vendor/a.tgz","integrity":"` + sha512 + `"}`), []string{"node_modules/a"}, false},
-		"npm sha1":           {npmLockViolations, npm(`{"resolved":"https://registry.npmjs.org/a/-/a-1.0.0.tgz","integrity":"sha1-AAAA"}`), []string{"node_modules/a"}, false},
-		"npm no integrity":   {npmLockViolations, npm(`{"resolved":"https://registry.npmjs.org/a/-/a-1.0.0.tgz"}`), []string{"node_modules/a"}, false},
-		"npm no resolved":    {npmLockViolations, npm(`{"version":"1.0.0","integrity":"` + sha512 + `"}`), []string{"node_modules/a"}, false},
-		"npm remote link":    {npmLockViolations, npm(`{"resolved":"git+https://example.com/a.git","link":true}`), []string{"node_modules/a"}, false},
-		"npm outside link":   {npmLockViolations, npm(`{"resolved":"../../outside","link":true}`), []string{"node_modules/a"}, false},
-		"npm outside target": {npmLockViolations, `{"lockfileVersion":3,"packages":{"../outside":{"version":"1.0.0"}}}`, []string{"../outside"}, false},
-		"npm version 1":      {npmLockViolations, `{"lockfileVersion":1,"dependencies":{}}`, nil, true},
-		"npm broken":         {npmLockViolations, `{`, nil, true},
+		"npm ok":                  {npmLockViolations, npmLockOK, nil, false},
+		"npm git":                 {npmLockViolations, npm(`{"resolved":"git+ssh://git@github.com/o/a.git#0123","integrity":"` + sha512 + `"}`), []string{"node_modules/a"}, false},
+		"npm other host":          {npmLockViolations, npm(`{"resolved":"https://registry.npmjs.org.example.com/a.tgz","integrity":"` + sha512 + `"}`), []string{"node_modules/a"}, false},
+		"npm http":                {npmLockViolations, npm(`{"resolved":"http://registry.npmjs.org/a/-/a-1.0.0.tgz","integrity":"` + sha512 + `"}`), []string{"node_modules/a"}, false},
+		"npm local tarball":       {npmLockViolations, npm(`{"resolved":"file:vendor/a.tgz","integrity":"` + sha512 + `"}`), []string{"node_modules/a"}, false},
+		"npm sha1":                {npmLockViolations, npm(`{"resolved":"https://registry.npmjs.org/a/-/a-1.0.0.tgz","integrity":"sha1-AAAA"}`), []string{"node_modules/a"}, false},
+		"npm no integrity":        {npmLockViolations, npm(`{"resolved":"https://registry.npmjs.org/a/-/a-1.0.0.tgz"}`), []string{"node_modules/a"}, false},
+		"npm no resolved":         {npmLockViolations, npm(`{"version":"1.0.0","integrity":"` + sha512 + `"}`), []string{"node_modules/a"}, false},
+		"npm remote link":         {npmLockViolations, npm(`{"resolved":"git+https://example.com/a.git","link":true}`), []string{"node_modules/a"}, false},
+		"npm outside link":        {npmLockViolations, npm(`{"resolved":"../../outside","link":true}`), []string{"node_modules/a"}, false},
+		"npm outside target":      {npmLockViolations, `{"lockfileVersion":3,"packages":{"../outside":{"version":"1.0.0"}}}`, []string{"../outside"}, false},
+		"npm link past a symlink": {npmLockViolations, npm(`{"resolved":"alias/../packages/local","link":true}`), []string{"node_modules/a"}, false},
+		"npm legacy only":         {npmLockViolations, `{"lockfileVersion":2,"dependencies":{"a":{"version":"1.0.0","resolved":"https://example.com/a.tgz"}}}`, nil, true},
+		"npm empty packages":      {npmLockViolations, `{"lockfileVersion":2,"packages":{},"dependencies":{"a":{"version":"1.0.0"}}}`, nil, false},
+		"npm no dependencies":     {npmLockViolations, `{"lockfileVersion":3}`, nil, false},
+		"npm version 1":           {npmLockViolations, `{"lockfileVersion":1,"dependencies":{}}`, nil, true},
+		"npm broken":              {npmLockViolations, `{`, nil, true},
 
-		"pnpm ok":                {pnpmLockViolations, pnpmLockOK, nil, false},
-		"pnpm tarball":           {pnpmLockViolations, "packages:\n  a@https://example.com/a.tgz:\n    resolution: {tarball: https://example.com/a.tgz}\n", []string{"a@https://example.com/a.tgz"}, false},
-		"pnpm git":               {pnpmLockViolations, "packages:\n  a@git:\n    resolution: {commit: abc, repo: https://example.com/a.git, type: git}\n", []string{"a@git"}, false},
-		"pnpm sha1":              {pnpmLockViolations, "packages:\n  a@1.0.0:\n    resolution: {integrity: sha1-AAAA}\n", []string{"a@1.0.0"}, false},
-		"pnpm outside directory": {pnpmLockViolations, "packages:\n  a@file:../outside:\n    resolution: {directory: ../outside, type: directory}\n", []string{"a@file:../outside"}, false},
-		"pnpm second document":   {pnpmLockViolations, "---\nlockfileVersion: '9.0'\npackages: {}\n---\n" + "packages:\n  a@1.0.0:\n    resolution: {tarball: https://example.com/a.tgz, integrity: " + sha512 + "}\n", []string{"a@1.0.0"}, false},
-		"pnpm broken":            {pnpmLockViolations, "packages: [", nil, true},
+		"pnpm ok":                     {pnpmLockViolations, pnpmLockOK, nil, false},
+		"pnpm tarball":                {pnpmLockViolations, "packages:\n  a@https://example.com/a.tgz:\n    resolution: {tarball: https://example.com/a.tgz}\n", []string{"a@https://example.com/a.tgz"}, false},
+		"pnpm git":                    {pnpmLockViolations, "packages:\n  a@git:\n    resolution: {commit: abc, repo: https://example.com/a.git, type: git}\n", []string{"a@git"}, false},
+		"pnpm sha1":                   {pnpmLockViolations, "packages:\n  a@1.0.0:\n    resolution: {integrity: sha1-AAAA}\n", []string{"a@1.0.0"}, false},
+		"pnpm outside directory":      {pnpmLockViolations, "packages:\n  a@file:../outside:\n    resolution: {directory: ../outside, type: directory}\n", []string{"a@file:../outside"}, false},
+		"pnpm importer link outside":  {pnpmLockViolations, "importers:\n  .:\n    dependencies:\n      a:\n        specifier: link:../outside\n        version: link:../outside\n", []string{"a@link"}, false},
+		"pnpm importer link absolute": {pnpmLockViolations, "importers:\n  .:\n    devDependencies:\n      a:\n        specifier: link:/abs/local\n        version: link:/abs/local\n", []string{"a@link"}, false},
+		"pnpm importer link inside":   {pnpmLockViolations, "importers:\n  packages:\n    dependencies:\n      a:\n        specifier: link:../local\n        version: link:../local\n      b:\n        specifier: ^1.0.0\n        version: 1.0.0\n", nil, false},
+		"pnpm second document":        {pnpmLockViolations, "---\nlockfileVersion: '9.0'\npackages: {}\n---\n" + "packages:\n  a@1.0.0:\n    resolution: {tarball: https://example.com/a.tgz, integrity: " + sha512 + "}\n", []string{"a@1.0.0"}, false},
+		"pnpm broken":                 {pnpmLockViolations, "packages: [", nil, true},
 
 		"uv ok":                {uvLockViolations, uvLockOK, nil, false},
 		"uv git":               {uvLockViolations, uv(`{ git = "https://example.com/a.git?rev=abc#abc" }`, ""), []string{"a"}, false},
@@ -104,12 +115,12 @@ func TestLockfileSourceViolations(t *testing.T) {
 }
 
 func TestRepositoryPathRejectsReferencesThatLeaveTheRepository(t *testing.T) {
-	for rel, want := range map[string]string{".": "web", "lib": "web/lib", "../shared": "shared", "./a/../b": "web/b"} {
+	for rel, want := range map[string]string{".": "web", "lib": "web/lib", "../shared": "shared", "./a/b": "web/a/b"} {
 		if got, ok := repositoryPath("web", rel); !ok || got != want {
 			t.Errorf("%q: %q %v", rel, got, ok)
 		}
 	}
-	for _, rel := range []string{"", "../..", "../../outside", "/abs", "C:\\abs", "file:../x", "..\\outside"} {
+	for _, rel := range []string{"", "../..", "../../outside", "/abs", "C:\\abs", "file:../x", "..\\outside", "./a/../b", "alias/../shared", "../alias/../shared", "a/b/../../c"} {
 		if got, ok := repositoryPath("web", rel); ok {
 			t.Errorf("accepted %q as %q", rel, got)
 		}
@@ -179,20 +190,31 @@ func TestDependencyIntakeSettings(t *testing.T) {
 		"npm mise npm pin":          {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"22.23.4\"\nnpm = \"11.19.0\"\n", ".npmrc": npmSet}, "pass", "pass", "pass"},
 
 		// lock が公式の URL でも、registry の設定で実際の取得先を変えられる。
-		"npm registry replaced":     {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "registry=https://registry.example.com/\n"}, "pass", "pass", "fail"},
-		"npm registry from env":     {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "registry=${NPM_REGISTRY}\n"}, "pass", "pass", "fail"},
-		"npm registry overridden":   {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "registry=https://registry.npmjs.org/\nregistry=http://registry.npmjs.org/\n"}, "pass", "pass", "fail"},
-		"npm scoped registry":       {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "@corp:registry=https://npm.example.com/\n"}, "pass", "pass", "fail"},
-		"npm official registries":   {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "registry=https://registry.npmjs.org\n@corp:registry = \"https://registry.npmjs.org/\"\n"}, "pass", "pass", "pass"},
-		"pnpm npmrc registry":       {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, ".npmrc": "registry=https://registry.example.com/\n"}, "warn", "pass", "fail"},
-		"pnpm npmrc unreadable":     {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, ".npmrc": "unreadable"}, "warn", "pass", "fail"},
-		"pnpm workspace registry":   {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, "pnpm-workspace.yaml": "registry: https://registry.example.com/\n"}, "warn", "pass", "fail"},
-		"pnpm registries by url":    {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, "pnpm-workspace.yaml": "registries:\n  https://npm.example.com/:\n    scopes: [\"@corp\"]\n"}, "warn", "pass", "fail"},
-		"pnpm registries by scope":  {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, "pnpm-workspace.yaml": "registries:\n  default: https://registry.npmjs.org/\n  \"@corp\": https://npm.example.com/\n"}, "warn", "pass", "fail"},
-		"pnpm official registries":  {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, "pnpm-workspace.yaml": "registry: https://registry.npmjs.org/\nregistries:\n  default: https://registry.npmjs.org/\n"}, "warn", "pass", "pass"},
-		"pnpm official declaration": {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, "pnpm-workspace.yaml": "registries:\n  https://registry.npmjs.org/:\n    networkConcurrency: 8\n"}, "warn", "pass", "pass"},
-		"pnpm named registries":     {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, "pnpm-workspace.yaml": "namedRegistries:\n  work: https://npm.example.com/\n"}, "warn", "pass", "fail"},
-		"pnpm pnpr server":          {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, "pnpm-workspace.yaml": "pnprServer: https://pnpr.example.com/\n"}, "warn", "pass", "fail"},
+		"npm registry replaced":   {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "registry=https://registry.example.com/\n"}, "pass", "pass", "fail"},
+		"npm registry from env":   {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "registry=${NPM_REGISTRY}\n"}, "pass", "pass", "fail"},
+		"npm registry overridden": {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "registry=https://registry.npmjs.org/\nregistry=http://registry.npmjs.org/\n"}, "pass", "pass", "fail"},
+		"npm scoped registry":     {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "@corp:registry=https://npm.example.com/\n"}, "pass", "pass", "fail"},
+		// 取得先に関わらない設定は、値が文字列でなくても判定に影響しない。
+		"npm unrelated number":  {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "maxsockets='20'\n"}, "pass", "pass", "pass"},
+		"npm registry not text": {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "registry='20'\n"}, "pass", "pass", "fail"},
+		// 同じファイルの before は min-release-age より優先される。
+		"npm before wins": {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "before=2099-01-01\n"}, "warn", "pass", "pass"},
+		// lockfile を分けたワークスペースでは、上位の設定が子の lockfile に効く。
+		"pnpm parent workspace registry": {map[string]string{"web/pnpm-lock.yaml": pnpmLockOK, "web/package.json": pnpm11, "pnpm-workspace.yaml": "registry: https://registry.example.com/\n"}, "warn", "pass", "fail"},
+		"pnpm parent npmrc registry":     {map[string]string{"web/pnpm-lock.yaml": pnpmLockOK, "web/package.json": pnpm11, ".npmrc": "registry=https://registry.example.com/\n"}, "warn", "pass", "fail"},
+		"pnpm parent unreadable":         {map[string]string{"web/pnpm-lock.yaml": pnpmLockOK, "web/package.json": pnpm11, "pnpm-workspace.yaml": "unreadable"}, "warn", "warn", "fail"},
+		"pnpm parent cooldown":           {map[string]string{"web/pnpm-lock.yaml": pnpmLockOK, "web/package.json": pnpm11, "pnpm-workspace.yaml": "minimumReleaseAge: 10080\n"}, "pass", "pass", "pass"},
+		"pnpm nearest workspace wins":    {map[string]string{"web/pnpm-lock.yaml": pnpmLockOK, "web/package.json": pnpm11, "web/pnpm-workspace.yaml": "minimumReleaseAge: 10080\n", "pnpm-workspace.yaml": "registry: https://registry.example.com/\n"}, "pass", "pass", "pass"},
+		"npm official registries":        {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "registry=https://registry.npmjs.org\n@corp:registry = \"https://registry.npmjs.org/\"\n"}, "pass", "pass", "pass"},
+		"pnpm npmrc registry":            {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, ".npmrc": "registry=https://registry.example.com/\n"}, "warn", "pass", "fail"},
+		"pnpm npmrc unreadable":          {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, ".npmrc": "unreadable"}, "warn", "pass", "fail"},
+		"pnpm workspace registry":        {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, "pnpm-workspace.yaml": "registry: https://registry.example.com/\n"}, "warn", "pass", "fail"},
+		"pnpm registries by url":         {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, "pnpm-workspace.yaml": "registries:\n  https://npm.example.com/:\n    scopes: [\"@corp\"]\n"}, "warn", "pass", "fail"},
+		"pnpm registries by scope":       {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, "pnpm-workspace.yaml": "registries:\n  default: https://registry.npmjs.org/\n  \"@corp\": https://npm.example.com/\n"}, "warn", "pass", "fail"},
+		"pnpm official registries":       {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, "pnpm-workspace.yaml": "registry: https://registry.npmjs.org/\nregistries:\n  default: https://registry.npmjs.org/\n"}, "warn", "pass", "pass"},
+		"pnpm official declaration":      {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, "pnpm-workspace.yaml": "registries:\n  https://registry.npmjs.org/:\n    networkConcurrency: 8\n"}, "warn", "pass", "pass"},
+		"pnpm named registries":          {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, "pnpm-workspace.yaml": "namedRegistries:\n  work: https://npm.example.com/\n"}, "warn", "pass", "fail"},
+		"pnpm pnpr server":               {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11, "pnpm-workspace.yaml": "pnprServer: https://pnpr.example.com/\n"}, "warn", "pass", "fail"},
 
 		// pnpm の既定の 1440 分は strict でなく、公開直後の版に fallback できる。
 		"pnpm 11 defaults":         {map[string]string{"pnpm-lock.yaml": pnpmLockOK, "package.json": pnpm11}, "warn", "pass", "pass"},
@@ -369,8 +391,9 @@ func TestCheckJudgesDependencyIntakeAndLockfileSources(t *testing.T) {
 	// 取得元の差し替えは不適合として終了コード 1 にし、ほかの判定は報告に残す。
 	write(t, tree.Root, "package-lock.json", strings.Replace(npmLockOK, "https://registry.npmjs.org/a/-/a-1.0.0.tgz", "https://user:"+marker+"@example.com/a-1.0.0.tgz", 1))
 	rejected("a replaced source", "package-lock.json: 1 packages are not fetched as required: node_modules/a")
-	if _, err := tree.Verify(nil); ExitCode(err) != 1 {
-		t.Fatalf("verify ran project tasks after a failed check: %v", err)
+	// 終了コード 1 はタスクの失敗でも返るので、タスクを始める前に止まったことを確かめる。
+	if report, err := tree.Verify(nil); ExitCode(err) != 1 || !strings.Contains(err.Error(), lockfileSourceRule) || report.Scope != "configuration-only" {
+		t.Fatalf("verify ran project tasks after a failed check: %s %v", report.Scope, err)
 	}
 	write(t, tree.Root, "package-lock.json", npmLockOK)
 
@@ -445,13 +468,14 @@ func TestDependencyResultsMatchTheCatalog(t *testing.T) {
 			declared[rule.ID+"/"+check.ID] = true
 		}
 	}
-	results := dependencyResults(dependencyContext{}, "main")
-	if len(results) != len(declared) {
-		t.Fatalf("declared %v, reported %+v", declared, results)
-	}
-	for _, r := range results {
-		if !declared[r.Rule+"/"+r.Check] {
-			t.Errorf("undeclared check: %s/%s", r.Rule, r.Check)
+	for _, r := range dependencyResults(dependencyContext{}, "main") {
+		key := r.Rule + "/" + r.Check
+		if !declared[key] {
+			t.Errorf("undeclared or duplicate check: %s", key)
 		}
+		delete(declared, key)
+	}
+	if len(declared) != 0 {
+		t.Errorf("declared checks without a result: %v", declared)
 	}
 }

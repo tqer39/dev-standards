@@ -63,20 +63,37 @@ func (t *Tree) dependencyResults(p *Plan, component string) []Result {
 		case "uv.lock":
 			settings = []string{"uv.toml"}
 		}
-		for _, base := range settings {
-			file := path.Join(path.Dir(name), base)
-			if _, planned := p.Inputs[file]; planned {
-				continue
+		dirs := []string{path.Dir(name)}
+		if path.Base(name) == "pnpm-lock.yaml" {
+			// lockfile を分けたワークスペースでは、設定は上位のワークスペースのルートにある。
+			dirs = ancestors(path.Dir(name))
+		}
+		for _, dir := range dirs {
+			for _, base := range settings {
+				file := path.Join(dir, base)
+				if _, planned := p.Inputs[file]; planned {
+					continue
+				}
+				v, err := t.Read(file)
+				if err != nil {
+					ctx.unreadable[file] = true
+					continue
+				}
+				ctx.inputs[file] = v
 			}
-			v, err := t.Read(file)
-			if err != nil {
-				ctx.unreadable[file] = true
-				continue
-			}
-			ctx.inputs[file] = v
 		}
 	}
 	return dependencyResults(ctx, component)
+}
+
+// ancestors lists dir and its parents up to the repository root.
+func ancestors(dir string) []string {
+	dirs := []string{dir}
+	for dir != "." {
+		dir = path.Dir(dir)
+		dirs = append(dirs, dir)
+	}
+	return dirs
 }
 
 func (t *Tree) localDirectory(p string) bool {
@@ -119,14 +136,28 @@ func dependencyResults(ctx dependencyContext, component string) []Result {
 			found, err := npmLockViolations(content, local)
 			sources = append(sources, sourceFinding(name, npmRegistry+" with sha512 integrity, and the project settings keep that registry", npmPackageKey, found, err, npmrcRegistryProblems(npmrc, settings, opaque, ctx.unreadable[npmrc])))
 		case "pnpm-lock.yaml":
+			// pnpm は、lockfile のディレクトリから上にたどって最初に見つけた pnpm-workspace.yaml を使う。
 			workspace := path.Join(dir, "pnpm-workspace.yaml")
+			var problems []string
+			for _, parent := range ancestors(dir) {
+				file := path.Join(parent, ".npmrc")
+				parentSettings, parentOpaque := npmrcSettings(ctx.inputs[file].Content)
+				problems = append(problems, npmrcRegistryProblems(file, parentSettings, parentOpaque, ctx.unreadable[file])...)
+			}
+			for _, parent := range ancestors(dir) {
+				file := path.Join(parent, "pnpm-workspace.yaml")
+				if ctx.inputs[file].Exists || ctx.unreadable[file] {
+					workspace = file
+					break
+				}
+			}
 			cfg, ok := pnpmWorkspace(ctx.inputs[workspace].Content)
 			if ctx.unreadable[workspace] {
 				ok = false
 			}
 			c, s := pnpmSettings(workspace, cfg, ok, pnpmMajor(ctx.inputs, dir))
 			cooldown, scripts = append(cooldown, c), append(scripts, s)
-			problems := append(npmrcRegistryProblems(npmrc, settings, opaque, ctx.unreadable[npmrc]), pnpmRegistryProblems(workspace, cfg, ok)...)
+			problems = append(problems, pnpmRegistryProblems(workspace, cfg, ok)...)
 			found, err := pnpmLockViolations(content, local)
 			sources = append(sources, sourceFinding(name, npmRegistry+" with sha512 integrity, and the project settings keep that registry", pnpmPackageKey, found, err, problems))
 		case "uv.lock":
@@ -163,7 +194,7 @@ func summarize(rule, check, component, subjects string, findings []finding) Resu
 // directory. Absolute paths, URLs and paths that leave the repository are not
 // local to it.
 func repositoryPath(dir, rel string) (string, bool) {
-	if rel == "" || strings.HasPrefix(rel, "/") || strings.ContainsAny(rel, ":\\\x00") {
+	if !plainRelative(rel) {
 		return "", false
 	}
 	p := path.Clean(path.Join(dir, rel))
@@ -173,12 +204,31 @@ func repositoryPath(dir, rel string) (string, bool) {
 	return p, true
 }
 
+// plainRelative accepts a relative path whose .. elements all come first. A
+// later .. would cancel the element before it unchecked, and that element can
+// be a symlink.
+func plainRelative(rel string) bool {
+	if rel == "" || strings.HasPrefix(rel, "/") || strings.ContainsAny(rel, ":\\\x00") {
+		return false
+	}
+	climbing := true
+	for _, part := range strings.Split(rel, "/") {
+		if part == ".." && !climbing {
+			return false
+		}
+		if part != ".." && part != "." && part != "" {
+			climbing = false
+		}
+	}
+	return true
+}
+
 // A lockfile key is quoted only when it has the shape of a registry package:
 // pnpm keys a URL dependency by its URL, which can include credentials, and
 // any key can be set to an arbitrary string by whoever edits the lockfile.
 var (
 	npmPackageKey  = regexp.MustCompile(`^(?:[a-z0-9@._~-]+/)*node_modules/(?:@[a-z0-9._~-]+/)?[a-z0-9._~-]+$`)
-	pnpmPackageKey = regexp.MustCompile(`^(?:@[a-z0-9._~-]+/)?[a-z0-9._~-]+@[0-9][A-Za-z0-9._+-]*$`)
+	pnpmPackageKey = regexp.MustCompile(`^(?:@[a-z0-9._~-]+/)?[a-z0-9._~-]+@(?:[0-9][A-Za-z0-9._+-]*|link)$`)
 	uvPackageName  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 )
 
@@ -283,23 +333,22 @@ func npmrcSettings(content string) (settings map[string]string, opaque bool) {
 		if rawKey == "" {
 			continue
 		}
-		key, exact := iniUnsafe(rawKey)
-		value := "true"
+		key, exactKey := iniUnsafe(rawKey)
+		value, exactValue := "true", true
 		if hasValue {
-			var exactValue bool
 			value, exactValue = iniUnsafe(rawValue)
-			exact = exact && exactValue
 		}
 		array := len(key) > 2 && strings.HasSuffix(key, "[]")
 		key = strings.TrimSuffix(key, "[]")
 		registry := key == "registry" || scopedRegistry.MatchString(key)
 		// 認証情報のキー（//host/:_authToken など）は、取得先を変えない。
 		mentions := strings.Contains(strings.ToLower(key), "registry") && !strings.HasPrefix(key, "//")
-		if !exact || strings.Contains(key, "${") || (mentions && (!registry || section || array)) {
+		// 値が文字列にならなくても、取得先に関わらないキーなら判定には影響しない。
+		if !exactKey || strings.Contains(key, "${") || (mentions && (!registry || section || array || !exactValue)) {
 			opaque = true
 			continue
 		}
-		if !section && !array {
+		if !section && !array && exactValue {
 			settings[key] = value
 		}
 	}
@@ -450,7 +499,11 @@ func npmCooldown(npmrc string, settings map[string]string, version string) findi
 	if err != nil || !(days > 0) {
 		return finding{"warn", npmrc, "min-release-age is not set to a positive number of days"}
 	}
-	set := "min-release-age=" + strconv.FormatFloat(days, 'f', -1, 64) + " days"
+	if _, set := settings["before"]; set {
+		// 同じファイルの before は min-release-age より優先され、固定の日付は待機にならない。
+		return finding{"warn", npmrc, "before is set in the same file and takes precedence over min-release-age"}
+	}
+	set := "min-release-age is a positive number of days"
 	switch version {
 	case "npm 11.10 or later":
 		return finding{"pass", npmrc, set + " with " + version}
@@ -513,7 +566,7 @@ func pnpmSettings(workspace string, cfg map[string]any, parsed bool, major int) 
 	case !explicit:
 		cooldown = finding{"pass", workspace, version + " applies its default minimumReleaseAge of 1440 minutes with minimumReleaseAgeStrict"}
 	default:
-		cooldown = finding{"pass", workspace, "minimumReleaseAge=" + strconv.FormatFloat(minutes, 'f', -1, 64) + " minutes, enforced strictly"}
+		cooldown = finding{"pass", workspace, "minimumReleaseAge is a positive number of minutes, enforced strictly"}
 	}
 	switch {
 	case cfg["dangerouslyAllowAllBuilds"] != nil && cfg["dangerouslyAllowAllBuilds"] != false:
@@ -606,10 +659,7 @@ func uvCooldown(ctx dependencyContext, dir string) finding {
 		if seconds <= 0 {
 			return finding{"warn", config, "exclude-newer is a zero duration"}
 		}
-		if seconds%86400 == 0 {
-			return finding{"pass", config, fmt.Sprintf("exclude-newer is a cooldown of %d days", seconds/86400)}
-		}
-		return finding{"pass", config, fmt.Sprintf("exclude-newer is a cooldown of %d seconds", seconds)}
+		return finding{"pass", config, "exclude-newer is a positive duration"}
 	}
 	if cutoff, err := time.Parse(time.RFC3339, s); err == nil {
 		if cutoff.Before(ctx.now) {
@@ -627,7 +677,8 @@ func pnpmLockViolations(content string, local func(string) bool) ([]string, erro
 	dec := yaml.NewDecoder(strings.NewReader(content))
 	for {
 		var doc struct {
-			Packages map[string]struct {
+			Importers map[string]map[string]any `yaml:"importers"`
+			Packages  map[string]struct {
 				Resolution map[string]any `yaml:"resolution"`
 			} `yaml:"packages"`
 		}
@@ -635,6 +686,23 @@ func pnpmLockViolations(content string, local func(string) bool) ([]string, erro
 			break
 		} else if err != nil {
 			return nil, err
+		}
+		// 直接の link: 依存は importer にだけ記録され、packages には現れない。
+		for importer, fields := range doc.Importers {
+			for _, field := range []string{"dependencies", "devDependencies", "optionalDependencies"} {
+				dependencies, _ := fields[field].(map[string]any)
+				for name, entry := range dependencies {
+					details, _ := entry.(map[string]any)
+					version, _ := details["version"].(string)
+					target, linked := strings.CutPrefix(version, "link:")
+					if !linked {
+						continue
+					}
+					if !local(importer) || !plainRelative(target) || !local(path.Join(importer, target)) {
+						found = append(found, name+"@link")
+					}
+				}
+			}
 		}
 		for name, pkg := range doc.Packages {
 			r := pkg.Resolution
