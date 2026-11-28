@@ -5,7 +5,7 @@
 TypeScript を使うリポジトリでは、型チェックに [tsrs](https://github.com/oxc-project/tsrs) を使う。
 tsrs は TypeScript 7 の型チェッカーを Rust に移植したもので、npm パッケージ `tsrs` として配布されている。
 型チェックだけを置き換え、アプリの実装言語、ビルド、実行時の依存は変えない。
-`tsconfig.json` も TypeScript のソースも持たないリポジトリは対象外とする。
+TypeScript のソースと `tsconfig.json` の両方を持つリポジトリを対象とし、どちらかがないリポジトリは対象外とする。
 
 公式には今も実験版なので、安定版になるまでは次の初期値で使う。
 利用先で扱いを変える場合は、理由と確認した内容を利用先の文書に残す。
