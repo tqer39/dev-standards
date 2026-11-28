@@ -57,6 +57,9 @@ func TestSharedGuidanceDeliveryRollbackAndConflict(t *testing.T) {
 			if !strings.Contains(shared, "## PROCESS-WORKTREE") || !strings.Contains(shared, "#### 作業場所") {
 				t.Fatal("worktree での作業に関する共通ルールが配布されていない")
 			}
+			if !strings.Contains(shared, "## CORE-TYPESCRIPT-TSRS") || !strings.Contains(shared, "#### tsc との併用") {
+				t.Fatal("TypeScript の型チェックに関する共通ルールが配布されていない")
+			}
 			if tc.instructions == "rulesync" {
 				entry := read(t, tree.Root, rulesyncEntryPath)
 				if !strings.Contains(entry, `targets: ["*"]`) || !strings.Contains(entry, "`.standards/rules.md`") {
@@ -90,7 +93,7 @@ func TestSharedGuidanceDeliveryRollbackAndConflict(t *testing.T) {
 }
 
 func TestSharedGuidanceUpgradeFromPreviousGuidance(t *testing.T) {
-	for _, rule := range []string{"PROCESS-PROJECT-TRACKING", "PROCESS-AI-DISCLOSURE", "PROCESS-JAPANESE-WRITING", "PROCESS-WORKTREE"} {
+	for _, rule := range []string{"PROCESS-PROJECT-TRACKING", "PROCESS-AI-DISCLOSURE", "PROCESS-JAPANESE-WRITING", "PROCESS-WORKTREE", "CORE-TYPESCRIPT-TSRS"} {
 		t.Run(rule, func(t *testing.T) {
 			tree := adoptWithAutomation(t)
 			path := ".standards/rules.md"

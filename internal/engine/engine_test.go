@@ -137,7 +137,7 @@ func TestAdoptReapplyOffline(t *testing.T) {
 	if !found {
 		t.Fatal("unexecuted checks reported as complete")
 	}
-	for _, rule := range []string{"CORE-ACTIONS-SECURITY", "CORE-CI-SPEED", "CORE-RENOVATE-GROUPING", "PROCESS-PROJECT-TRACKING", "PROCESS-AI-DISCLOSURE", "PROCESS-JAPANESE-WRITING", "PROCESS-WORKTREE"} {
+	for _, rule := range []string{"CORE-ACTIONS-SECURITY", "CORE-CI-SPEED", "CORE-RENOVATE-GROUPING", "PROCESS-PROJECT-TRACKING", "PROCESS-AI-DISCLOSURE", "PROCESS-JAPANESE-WRITING", "PROCESS-WORKTREE", "CORE-TYPESCRIPT-TSRS"} {
 		matched := 0
 		for _, r := range report.Results {
 			if r.Rule != rule {

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "CORE-TYPESCRIPT-TSRS",
+  "revision": 1,
+  "status": "active",
+  "title": "TypeScript の型チェックに tsrs を使う",
+  "rationale": "型チェックを速くして開発の待ち時間を減らす。実験版のあいだは tsc を必須の検査に残し、必須チェックを落とさない。",
+  "appliesTo": {"profiles": ["base"]},
+  "phases": ["adopt", "pr"],
+  "enforcement": {"level": "warning", "waivable": false},
+  "checks": [
+    {"id": "review", "type": "review", "handler": "typescript-tsrs", "parameters": {}}
+  ],
+  "remediation": {
+    "mode": "assisted",
+    "handler": "typescript-tsrs",
+    "instructions": "TypeScript を使う利用先で、tsrs を mise の npm ツールとして版を固定し、タスクとして追加する。tsc の型チェックと必須チェックは残し、バイナリがないプラットフォームでは tsc を使う。"
+  },
+  "guidance": "guidance/core/typescript-tsrs.md",
+  "references": [
+    "https://github.com/oxc-project/tsrs",
+    "https://github.com/oxc-project/tsrs/blob/main/docs/COMPATIBILITY.md",
+    "https://mise.jdx.dev/dev-tools/backends/npm.html"
+  ]
+}

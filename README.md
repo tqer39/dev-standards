@@ -88,6 +88,19 @@ textlint は文章規則、cspell は英単語や技術用語の綴り、yomiyas
 `check` と `verify` は作業場所を検査せず、`review_required` と報告します。
 既存利用先への配布には採用版の更新計画と適用が必要です。
 
+## TypeScript の型チェック
+
+TypeScript を使う利用先では、型チェックに [tsrs](https://github.com/oxc-project/tsrs) を使う
+[共通ルール](guidance/core/typescript-tsrs.md)を配布します。
+tsrs は mise の npm ツールとして版を固定し、`typecheck:tsrs` などのタスクとして実行します。
+tsrs は実験版のため、安定版になるまでは tsc の型チェックを必須の検査として残します。
+固定した版にバイナリがないプラットフォームでは tsc を使い、tsrs のタスクを CI の必須チェックには接続しません。
+版を更新するときは、配布元、対応プラットフォーム、既知の互換性の問題を確認します。
+自律保守または rulesync の共通入口を導入した利用先へ `.standards/rules.md` として届きます。
+配布だけでは利用先にタスクを追加せず、生成する CI も変更しません。
+`check` と `verify` は tsrs の導入と実行結果を判定せず、`review_required` と報告します。
+既存利用先への配布には採用版の更新計画と適用が必要です。
+
 ## 旧委譲ルールの移行
 
 旧版で配布していた `.claude/rules/dev-standards-agent-harness.md` は廃止しました。
