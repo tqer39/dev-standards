@@ -104,7 +104,7 @@ exclude-newer = "7 days"
   相対指定（`"7 days"`）では、uv 0.11.32 と 0.13.8 は `uv.lock` の `[options]` に期間（`exclude-newer-span = "P7D"`）を記録する。
   併記される `exclude-newer` は互換のための固定値（`0001-01-01T00:00:00Z`）で、解決した時刻ではない。
   この 2 つの版では、日付が変わっても `--locked` は失敗せず、`uv lock` をやり直しても差分は出ない。
-- pnpm: 現在の pnpm は、lockfile を読み込むときにも `minimumReleaseAge` を lockfile の各項目に適用して検証する。
+- pnpm: pnpm 11.1.3 以降は、lockfile を読み込むときにも `minimumReleaseAge` を lockfile の各項目に適用して検証する。
   `trustLockfile: true` はこの検証を省くので、設定しない。
 
 ## Renovate との関係
@@ -115,8 +115,12 @@ exclude-newer = "7 days"
   パッケージマネージャーの待機はそのまま効く。待機期間より新しい修正版への更新は、lockfile の生成で失敗する。
   急ぐ場合は、該当のパッケージだけを除外する（npm は `min-release-age-exclude`、pnpm は `minimumReleaseAgeExclude`、
   uv は `exclude-newer-package`）。
-- 除外は、修正版の公開から待機期間が過ぎた後に取り除く。修正版を取り込んだ直後には取り除かない。
-  pnpm は lockfile の各項目にも待機期間を適用するので、待機期間の内側で除外を外すと、次の install が拒否される。
+- 除外は、除外したパッケージの lockfile にある版がすべて待機期間を過ぎた後に取り除く。修正版を取り込んだ直後には取り除かない。
+  pnpm の除外をパッケージ名だけで書くと、そのパッケージのすべての版に効く。
+  除外の間に、修正版より新しい版が lockfile に入ることがあるので、修正版の公開日だけでは判断しない。
+  pnpm 11.1.3 以降は lockfile の各項目にも待機期間を適用する。
+  待機期間の内側の版が残ったまま除外を外すと、次の install が拒否される。
+  pnpm 11.1.2 以前は lockfile を検証しないが、同じ手順で取り除く。
 - uv は、`exclude-newer-package` を追加したときだけでなく、取り除いたときにも `uv lock` を実行して `uv.lock` を更新する。
   取り除いただけでは、`uv sync --locked` と `uv run --locked` は lock が古いとして失敗する（uv 0.11.32 と 0.13.8 で確認）。
 - Renovate は uv の `exclude-newer` を読まず、uv にも待機期間を渡さない。
