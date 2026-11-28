@@ -348,7 +348,11 @@ func npmrcSettings(content string) (settings map[string]string, opaque bool) {
 			opaque = true
 			continue
 		}
-		if !section && !array && exactValue {
+		if !section && !array {
+			if !exactValue {
+				// 値は使えなくても、設定があること自体は判定に要る（before など）。
+				value = ""
+			}
 			settings[key] = value
 		}
 	}

@@ -198,7 +198,10 @@ func TestDependencyIntakeSettings(t *testing.T) {
 		"npm unrelated number":  {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "maxsockets='20'\n"}, "pass", "pass", "pass"},
 		"npm registry not text": {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "registry='20'\n"}, "pass", "pass", "fail"},
 		// 同じファイルの before は min-release-age より優先される。
-		"npm before wins": {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "before=2099-01-01\n"}, "warn", "pass", "pass"},
+		"npm before wins":       {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "before=2099-01-01\n"}, "warn", "pass", "pass"},
+		"npm before null":       {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "before='null'\n"}, "warn", "pass", "pass"},
+		"npm before bare null":  {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "before=null\n"}, "warn", "pass", "pass"},
+		"npm settings not text": {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": "min-release-age='[7]'\nignore-scripts='[true]'\n"}, "warn", "warn", "pass"},
 		// lockfile を分けたワークスペースでは、上位の設定が子の lockfile に効く。
 		"pnpm parent workspace registry": {map[string]string{"web/pnpm-lock.yaml": pnpmLockOK, "web/package.json": pnpm11, "pnpm-workspace.yaml": "registry: https://registry.example.com/\n"}, "warn", "pass", "fail"},
 		"pnpm parent npmrc registry":     {map[string]string{"web/pnpm-lock.yaml": pnpmLockOK, "web/package.json": pnpm11, ".npmrc": "registry=https://registry.example.com/\n"}, "warn", "pass", "fail"},
