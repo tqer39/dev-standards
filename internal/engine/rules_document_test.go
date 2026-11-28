@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -37,8 +39,28 @@ func TestDistributedRulesPassProjectLinters(t *testing.T) {
 		t.Fatal("section headings lack the rule ID")
 	}
 	// Dictionaries lack the zizmor audit name, so the document declares it for cspell.
-	if !strings.Contains(rules, "<!-- cspell:words artipacked -->") {
+	if !strings.Contains(rules, "<!-- cspell:words artipacked zizmor betterleaks -->") {
 		t.Fatal("zizmor audit name is not declared for cspell")
+	}
+}
+
+// Projects add no words for the distributed rules, so every word outside the
+// dictionaries bundled with cspell must be declared in the guidance itself.
+func TestDistributedRulesPassCspellWithoutProjectWords(t *testing.T) {
+	cspell, err := exec.LookPath("cspell")
+	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("cspell is not installed")
+		}
+		t.Skip("cspell is not installed; mise installs it")
+	}
+	dir := t.TempDir()
+	write(t, dir, "rules.md", read(t, adoptWithAutomation(t).Root, ".standards/rules.md"))
+	write(t, dir, "cspell.json", `{"version": "0.2", "language": "en"}`+"\n")
+	cmd := exec.Command(cspell, "--no-progress", "--config", "cspell.json", "rules.md")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("declare the words with cspell:words in the guidance: %v\n%s", err, out)
 	}
 }
 

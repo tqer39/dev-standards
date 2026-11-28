@@ -5,7 +5,7 @@ npm、pnpm、uv を使うリポジトリでは、公開直後の版を解決し�
 Renovate の `minimumReleaseAge` は、Renovate が作る更新にしか効かない。
 パッケージマネージャーの設定は、人やエージェントが手元で `npm install foo`、`pnpm add foo`、`uv add foo` を実行したときにも効く。
 
-<!-- cspell:words sdist -->
+<!-- cspell:words sdist cooldown pyproject -->
 
 ## check が判定する項目
 

@@ -4,7 +4,7 @@ GitHub Actions を使うリポジトリでは、すべてのワークフロー�
 依存するアクションや PR の内容が改ざんされても、リポジトリの権限と secret に被害が及ばないようにする。
 対策は、`zizmor` の判定項目と、人が確認する項目に分かれる。
 
-<!-- cspell:words artipacked -->
+<!-- cspell:words artipacked zizmor betterleaks -->
 
 ## zizmor が判定する項目
 
