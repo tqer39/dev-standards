@@ -436,6 +436,8 @@ jobs:
 // zizmor audits only the workflows generated here: existing project workflows
 // may still have findings, and auditing them would break CI on upgrade.
 // betterleaks reads the project's own .betterleaks.toml only with the auto-load flag.
+// Verbose output redacts only the reported secret and prints the rest of its line,
+// so the report template prints the file, line, and rule ID instead.
 const supplyChainJob = `  supply-chain:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -452,5 +454,5 @@ const supplyChainJob = `  supply-chain:
         run: mise exec aqua:zizmorcore/zizmor@1.32.0 -- zizmor --offline --min-severity medium .github/workflows/dev-standards.yml ` + versionLagWorkflowPath + `
       - name: Scan the working tree for secrets
         if: ${{ !cancelled() }}
-        run: mise exec aqua:betterleaks/betterleaks@1.10.1 -- betterleaks dir --no-banner --verbose --redact --unsafe-auto-load-config .
+        run: mise exec aqua:betterleaks/betterleaks@1.10.1 -- betterleaks dir --no-banner --redact --unsafe-auto-load-config --report-format template --report-template <(printf '%s' '{{range .}}{{toJSON .File}}:{{.StartLine}} {{.RuleID}}{{"\n"}}{{end}}') --report-path - .
 `

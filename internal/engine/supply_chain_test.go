@@ -1,8 +1,13 @@
 package engine
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -110,10 +115,56 @@ func TestSupplyChainJobGatesRequiredJobInEveryProfile(t *testing.T) {
 			if audit != "mise exec aqua:zizmorcore/zizmor@1.32.0 -- zizmor --offline --min-severity medium "+mainWorkflowPath+" "+versionLagWorkflowPath {
 				t.Fatalf("audit must be pinned and limited to generated workflows: %s", audit)
 			}
-			if secrets != "mise exec aqua:betterleaks/betterleaks@1.10.1 -- betterleaks dir --no-banner --verbose --redact --unsafe-auto-load-config ." {
+			if !strings.HasPrefix(secrets, "mise exec aqua:betterleaks/betterleaks@1.10.1 -- betterleaks dir --no-banner --redact --unsafe-auto-load-config ") || !strings.HasSuffix(secrets, " --report-path - .") {
 				t.Fatalf("secret scan must be pinned, redacted, and limited to the working tree: %s", secrets)
 			}
+			if strings.Contains(secrets, "--verbose") {
+				t.Fatalf("verbose output prints the other secrets on a reported line: %s", secrets)
+			}
 		})
+	}
+}
+
+// betterleaks 1.10.1 redacts only the reported secret in its verbose output, so
+// a second secret on the same line reached the public CI log. The step must
+// still fail and name the place, without printing either value.
+func TestSecretScanStepNeverPrintsSecretValues(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("generated steps run on GitHub-hosted Linux")
+	}
+	if _, err := exec.LookPath("mise"); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("CI must run the secret scan step")
+		}
+		t.Skip("mise is not installed")
+	}
+	var scan string
+	for _, step := range parseSupplyChain(t, componentWorkflow(defaultManifest(), "")).Jobs["supply-chain"].Steps {
+		if step.Name == "Scan the working tree for secrets" {
+			scan = step.Run
+		}
+	}
+	// Built at run time so that this file holds no value a scanner reports.
+	var values []string
+	for _, seed := range []string{"A", "B"} {
+		values = append(values, "ghp_"+fmt.Sprintf("%x", sha256.Sum256([]byte("THIS IS AN INVALID TEST FIXTURE "+seed)))[:36])
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "fixture.txt"), []byte("token0="+values[0]+" token1="+values[1]+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output, err := runWorkflowStep(t, dir, scan, nil)
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Fatalf("scan must fail on a finding: %v", err)
+	}
+	if strings.Count(output, "\"fixture.txt\":1 github-pat\n") != 2 {
+		t.Fatal("scan must report the file, line, and rule of both findings")
+	}
+	for _, value := range values {
+		if strings.Contains(output, value) {
+			t.Fatal("scan printed a secret value")
+		}
 	}
 }
 

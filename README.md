@@ -293,9 +293,10 @@ mise と依存の導入はその後になり、必須の lint・整形確認・�
 どちらも版を固定して `mise exec` で実行するため、利用先の `mise.toml` には追記しません。
 既存利用先には採用版の更新で届きます。作業ツリーに betterleaks の検出が残っていると、更新後の CI が失敗します。
 更新の前に、次のコマンドで確認してください。
+検出したファイル、行、ルール ID だけを表示します。`--verbose` は、同じ行にある別の secret を伏せずに表示するので使いません。
 
 ```sh
-mise exec aqua:betterleaks/betterleaks@1.10.1 -- betterleaks dir --no-banner --verbose --redact --unsafe-auto-load-config .
+mise exec aqua:betterleaks/betterleaks@1.10.1 -- betterleaks dir --no-banner --redact --unsafe-auto-load-config --report-format template --report-template <(printf '%s' '{{range .}}{{toJSON .File}}:{{.StartLine}} {{.RuleID}}{{"\n"}}{{end}}') --report-path - .
 ```
 
 ## 依存の取り込みと lockfile の検査
