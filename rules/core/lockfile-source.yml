@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "CORE-LOCKFILE-SOURCE",
+  "revision": 1,
+  "status": "active",
+  "title": "lockfile の取得元を公式レジストリに限る",
+  "rationale": "lockfile を書き換えて依存の取得元を差し替える変更を、依存を導入する前に検出する。",
+  "appliesTo": {
+    "profiles": [
+      "base"
+    ]
+  },
+  "phases": [
+    "adopt",
+    "pr"
+  ],
+  "enforcement": {
+    "level": "error",
+    "waivable": false
+  },
+  "checks": [
+    {
+      "id": "source",
+      "type": "builtin",
+      "handler": "lockfile-source",
+      "parameters": {}
+    }
+  ],
+  "remediation": {
+    "mode": "manual",
+    "handler": "lockfile",
+    "instructions": "check が示したパッケージを、公式レジストリから取得する版に置き換えて lockfile を再生成する。git や URL、tarball、リポジトリの外のディレクトリを指す依存は、公式レジストリに公開された版かリポジトリ内のディレクトリに変える。.npmrc と pnpm-workspace.yaml のレジストリの設定は、公式レジストリに戻すか取り除く。"
+  },
+  "guidance": "guidance/core/lockfile-source.md",
+  "references": [
+    "https://docs.npmjs.com/cli/v11/configuring-npm/package-lock-json",
+    "https://pnpm.io/lockfile",
+    "https://docs.astral.sh/uv/concepts/projects/layout/#the-lockfile",
+    "https://pnpm.io/settings"
+  ]
+}

@@ -60,6 +60,55 @@ func validatePythonInputs(p *Plan, c Component) error {
 	return nil
 }
 
+// uvLockViolations lists the packages uv would fetch from anywhere but PyPI,
+// or without a sha256 hash. Editable, virtual and directory sources are exempt
+// only when local confirms the directory is inside the repository.
+func uvLockViolations(content string, local func(string) bool) ([]string, error) {
+	var lock struct {
+		Package []struct {
+			Name   string           `toml:"name"`
+			Source map[string]any   `toml:"source"`
+			Sdist  map[string]any   `toml:"sdist"`
+			Wheels []map[string]any `toml:"wheels"`
+		} `toml:"package"`
+	}
+	if _, err := toml.Decode(content, &lock); err != nil {
+		return nil, err
+	}
+	var found []string
+	for _, pkg := range lock.Package {
+		directory, isLocal := "", false
+		for _, kind := range []string{"editable", "virtual", "directory"} {
+			if v, ok := pkg.Source[kind]; ok {
+				directory, _ = v.(string)
+				isLocal = true
+			}
+		}
+		if isLocal {
+			if len(pkg.Source) != 1 || !local(directory) {
+				found = append(found, pkg.Name)
+			}
+			continue
+		}
+		ok := pkg.Source["registry"] == "https://pypi.org/simple"
+		files := pkg.Wheels
+		if pkg.Sdist != nil {
+			files = append([]map[string]any{pkg.Sdist}, files...)
+		}
+		for _, f := range files {
+			url, _ := f["url"].(string)
+			hash, _ := f["hash"].(string)
+			if !strings.HasPrefix(url, "https://files.pythonhosted.org/") || !strings.HasPrefix(hash, "sha256:") {
+				ok = false
+			}
+		}
+		if !ok {
+			found = append(found, pkg.Name)
+		}
+	}
+	return found, nil
+}
+
 // Project extensions add checks without replacing the required language tasks.
 func componentTasks(c Component, project string) string {
 	base := tasks()

@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 var nodeScripts = []string{"lint", "format", "format:check", "test", "build"}
@@ -52,6 +53,55 @@ func validateNodeInputs(p *Plan, c Component) error {
 		return fmt.Errorf("package-lock.json must use lockfileVersion 2 or later")
 	}
 	return nil
+}
+
+// npmLockViolations lists the packages npm would fetch from anywhere but the
+// public registry, or without a sha512 integrity. Bundled packages carry no
+// fetch of their own, and neither does a link to a directory that local
+// confirms is inside the repository.
+func npmLockViolations(content string, local func(string) bool) ([]string, error) {
+	var lock struct {
+		LockfileVersion int `json:"lockfileVersion"`
+		Packages        map[string]struct {
+			Resolved  string `json:"resolved"`
+			Integrity string `json:"integrity"`
+			Link      bool   `json:"link"`
+			InBundle  bool   `json:"inBundle"`
+		} `json:"packages"`
+		Dependencies map[string]json.RawMessage `json:"dependencies"`
+	}
+	if err := json.Unmarshal([]byte(content), &lock); err != nil {
+		return nil, err
+	}
+	if lock.LockfileVersion < 2 {
+		// 版 1 には packages がなく、空の一覧を合格と誤って報告してしまう。
+		return nil, fmt.Errorf("lockfileVersion 2 or later is required")
+	}
+	if lock.Packages == nil && len(lock.Dependencies) > 0 {
+		// packages がないと、npm は旧形式の dependencies から依存を復元する。
+		return nil, fmt.Errorf("packages is required beside the legacy dependencies")
+	}
+	var found []string
+	for name, pkg := range lock.Packages {
+		if name == "" || pkg.InBundle {
+			continue
+		}
+		installed := strings.Contains("/"+name, "/node_modules/")
+		switch {
+		case pkg.Link:
+			if !local(pkg.Resolved) {
+				found = append(found, name)
+			}
+		case !installed && pkg.Resolved == "":
+			// link の指す先。キーがそのディレクトリのパスになる。
+			if !local(name) {
+				found = append(found, name)
+			}
+		case !strings.HasPrefix(pkg.Resolved, npmRegistry) || !strings.HasPrefix(pkg.Integrity, "sha512-"):
+			found = append(found, name)
+		}
+	}
+	return found, nil
 }
 
 // Lifecycle scripts stay disabled so bootstrap does not run dependency code.
