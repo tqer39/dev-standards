@@ -276,7 +276,8 @@ Node.js の gitignore.io 入力を基底とし、Python、Go、Swift などの�
 Node.js/npm の利用先で依存導入前に既存の安全性検査が必要な場合は、
 `.standards/repository.yml` の `ci.nodePreflight` に、例えば `scripts/check-ci-security.mjs` を指定します。
 空でない既存の `.mjs` ファイルだけを指定でき、親ディレクトリやシェル式は拒否します。
-この検査は mise と依存の導入より前に実行し、必須の lint・整形確認・テスト・ビルドも維持します。
+この検査は各ジョブの checkout の直後に実行します。生成 CI は、この検査より前に `run:` の step を置きません。
+mise と依存の導入はその後になり、必須の lint・整形確認・テスト・ビルドも維持します。
 正本を変更した後は `plan` と `apply` で CI を再生成してください。
 
 自律保守の CI には `supply-chain` ジョブがあり、ツールと依存の導入より前に次の検査を実行します。
@@ -286,6 +287,8 @@ Node.js/npm の利用先で依存導入前に既存の安全性検査が必要�
   利用先が書いたワークフローは対象にしません。対象を広げる条件は[共通ルール](guidance/core/actions-security.md)に記載しています。
 - betterleaks: 作業ツリーの secret を検査します。全履歴は対象にしません。
   誤検知は、利用先のルートの `.betterleaks.toml` か、該当行の `betterleaks:allow` コメントで除外します。
+  `.betterleaks.toml` には `[extend]` の `useDefault = true` が必要です。
+  除外だけを書いた設定は既定のルールを置き換え、何も検出しなくなります。
 
 どちらも版を固定して `mise exec` で実行するため、利用先の `mise.toml` には追記しません。
 既存利用先には採用版の更新で届きます。作業ツリーに betterleaks の検出が残っていると、更新後の CI が失敗します。

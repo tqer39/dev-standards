@@ -4,6 +4,8 @@ lockfile に記録された依存の取得元を、公式レジストリと完�
 `npm ci` や `uv sync --locked` は lockfile のとおりに導入するので、lockfile の取得元を差し替える変更は、
 manifest との不一致としては検出されない。`check` が lockfile の中身を読んで検出する。
 
+<!-- cspell:words sdist npmjs pnpr -->
+
 ## check が判定する項目
 
 `check` は、plan の入力にある lockfile を読み、次を満たさないパッケージがあれば `fail` と報告して終了コード 1 で終了する。
@@ -15,7 +17,7 @@ manifest との不一致としては検出されない。`check` が lockfile �
 | `uv.lock` | `source` が `registry = "https://pypi.org/simple"` で、sdist と wheel の `url` が `https://files.pythonhosted.org/` で始まり、`hash` が `sha256:` で始まる |
 
 - git、URL、tarball を指す依存は不適合になる。公式レジストリに公開された版へ置き換える。
-- `package-lock.json` は `lockfileVersion` 2 以上が必要である。
+- `package-lock.json` には `lockfileVersion` 2 以上が要る。
   `packages` がなく旧形式の `dependencies` だけがある場合は、判定できないので不適合にする。
 - `pnpm-lock.yaml` が複数の文書に分かれている場合は、すべての文書を読む。
 - `node-npm` と `python-uv` はコンポーネントの lockfile を、`mise-project` はリポジトリ内のすべての lockfile を対象にする。
@@ -39,11 +41,11 @@ npm は `resolved` の `registry.npmjs.org` を設定中のレジストリに読
   `registry` を含む未知のキー（`replace-registry-host` など）が該当する。
   `//host/:_authToken` のような認証情報のキーは対象にしない。
 - pnpm では、lockfile のディレクトリからリポジトリのルートまでの `.npmrc` と、
-  上にたどって最初に見つかった `pnpm-workspace.yaml` を読む。lockfile を分けたワークスペースでは、上位の設定が効くためである。
+  上にたどって最初に見つかった `pnpm-workspace.yaml` を読む。lockfile を分けたワークスペースにも、上位の設定が効く。
 - 安全に読めない `.npmrc`（リポジトリの外を指すシンボリックリンクなど）と、解析できない `pnpm-workspace.yaml` は、
   実際のレジストリが分からないので不適合にする。
 - uv は `uv.lock` に記録した URL から取得するので、uv の index の設定は読まない。
-- `check` が読むのはリポジトリ内の設定だけである。利用者や端末の設定（`~/.npmrc` など）、環境変数、
+- `check` はリポジトリ内の設定だけを読む。利用者や端末の設定（`~/.npmrc` など）、環境変数、
   コマンドラインの指定によるレジストリの変更は判定しない。
 
 ## リポジトリ内のディレクトリを指す依存
@@ -53,7 +55,7 @@ npm の `link` とその指す先、pnpm の `directory` と importer の `link:
 次の場合は不適合にする。
 
 - 親ディレクトリの参照でリポジトリの外に出る。
-- 絶対パスである。
+- 絶対パスを指す。
 - 途中にシンボリックリンクがある。
 - 先頭より後に `..` がある（`alias/../shared` など。手前の要素を確かめられない）。
 - 存在しない、またはディレクトリでない。
@@ -62,7 +64,7 @@ npm の同梱（`inBundle`）の項目は、親のパッケージの tarball に
 
 ## 報告に載せる内容
 
-lockfile のキーや設定の値には、認証情報つきの URL が入ることがある。
+lockfile のキーや設定の値は、認証情報つきの URL を含むことがある。
 `check` は、レジストリのパッケージ名の形をしたキーだけを報告に載せ、それ以外は順番だけを示す。
 設定の値と、解析エラーの本文は載せない。
 

@@ -39,6 +39,17 @@ func parseSupplyChain(t *testing.T, content string) supplyChainDocument {
 	return document
 }
 
+func supplyChainGate(t *testing.T, steps []supplyChainStep) (int, supplyChainStep) {
+	t.Helper()
+	for i, step := range steps {
+		if step.Name == "Require the supply-chain job" {
+			return i, step
+		}
+	}
+	t.Fatal("required job lacks the supply-chain gate")
+	return 0, supplyChainStep{}
+}
+
 func requiredJobName(profile string) string {
 	if profile == "go" {
 		return "workflow-result"
@@ -64,9 +75,13 @@ func TestSupplyChainJobGatesRequiredJobInEveryProfile(t *testing.T) {
 			if len(required.Needs) != 1 || required.Needs[0] != "supply-chain" || required.If != "always()" {
 				t.Fatalf("required job can be skipped or does not wait: needs=%v if=%q", required.Needs, required.If)
 			}
-			gate := required.Steps[0]
-			if gate.Env["SUPPLY_CHAIN"] != "${{ needs.supply-chain.result }}" || gate.Run != `test "$SUPPLY_CHAIN" = success` {
+			at, gate := supplyChainGate(t, required.Steps)
+			if gate.Env["SUPPLY_CHAIN"] != "${{ needs.supply-chain.result }}" || gate.Run != `test "$SUPPLY_CHAIN" = success` || gate.If != "" {
 				t.Fatalf("required job does not fail with the supply-chain job: %+v", gate)
+			}
+			// Only checkout may precede the gate: the job must fail before it installs tools or runs project code.
+			if at != 1 || !strings.HasPrefix(required.Steps[0].Uses, "actions/checkout@") {
+				t.Fatalf("gate must directly follow checkout: %+v", required.Steps[:at+1])
 			}
 			job := document.Jobs["supply-chain"]
 			if job.RunsOn != "ubuntu-24.04" || len(job.Needs) != 0 {
@@ -106,7 +121,7 @@ func TestRequiredJobFailsUnlessSupplyChainSucceeded(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("generated steps run on GitHub-hosted Linux")
 	}
-	gate := parseSupplyChain(t, componentWorkflow(defaultManifest(), "")).Jobs["workflow-result"].Steps[0]
+	_, gate := supplyChainGate(t, parseSupplyChain(t, componentWorkflow(defaultManifest(), "")).Jobs["workflow-result"].Steps)
 	for result, pass := range map[string]bool{"success": true, "failure": false, "cancelled": false, "skipped": false, "": false} {
 		_, err := runWorkflowStep(t, t.TempDir(), gate.Run, []string{"SUPPLY_CHAIN=" + result})
 		if (err == nil) != pass {
@@ -142,6 +157,34 @@ func TestSupplyChainJobIsUnaffectedByProjectSettings(t *testing.T) {
 		if preflight < 0 || preflight > mise {
 			t.Fatalf("%s installs mise before the existing preflight", name)
 		}
+	}
+}
+
+// A project's preflight may reject a job that has a run step, or any action
+// other than checkout, before it (kazokubi's scripts/check-ci-security.mjs).
+// The generated jobs must pass such a check without an exception on the project side.
+func TestNodePreflightDirectlyFollowsCheckoutInEveryJob(t *testing.T) {
+	for _, profile := range []string{"go", "node-npm", "python-uv", "mise-project"} {
+		t.Run(profile, func(t *testing.T) {
+			m := defaultManifest()
+			m.Components[0].Profile = profile
+			m.CI.NodePreflight = "scripts/check.mjs"
+			workflows := map[string]string{
+				mainWorkflowPath:       componentWorkflow(m, ""),
+				versionLagWorkflowPath: versionLagWorkflowFor(m),
+			}
+			for path, content := range workflows {
+				for name, job := range parseSupplyChain(t, content).Jobs {
+					if len(job.Steps) < 2 || !strings.HasPrefix(job.Steps[0].Uses, "actions/checkout@") || job.Steps[1].Run != "node scripts/check.mjs" {
+						t.Fatalf("%s %s: preflight must directly follow checkout: %+v", path, name, job.Steps)
+					}
+				}
+			}
+			required := parseSupplyChain(t, workflows[mainWorkflowPath]).Jobs[requiredJobName(profile)]
+			if at, _ := supplyChainGate(t, required.Steps); at != 2 {
+				t.Fatalf("gate must follow the preflight: %+v", required.Steps[:at+1])
+			}
+		})
 	}
 }
 

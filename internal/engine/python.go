@@ -187,8 +187,10 @@ func componentWorkflow(m Manifest, project string) string {
 		workflow = strings.Replace(workflow, "on: [push, pull_request]", events, 1)
 	}
 	if m.CI.NodePreflight != "" {
-		// Every job runs the preflight before it installs mise.
-		workflow = strings.ReplaceAll(workflow, "      - uses: jdx/mise-action@", "      - run: node "+m.CI.NodePreflight+"\n      - uses: jdx/mise-action@")
+		// Every job runs the preflight right after checkout: a project's preflight
+		// may reject a job that has any other step before it.
+		const checkout = "        with:\n          persist-credentials: false\n"
+		workflow = strings.ReplaceAll(workflow, checkout, checkout+"      - run: node "+m.CI.NodePreflight+"\n")
 	}
 	if len(m.Companions) > 0 {
 		workflow = strings.Replace(workflow, "      - run: mise run build\n", "      - run: mise run build\n      - run: mise run standards:companions\n", 1)

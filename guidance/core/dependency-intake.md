@@ -2,12 +2,14 @@
 
 npm、pnpm、uv を使うリポジトリでは、公開直後の版を解決しない待機期間と、依存の install スクリプトの抑止を、
 パッケージマネージャー自身の設定に書く。
-Renovate の `minimumReleaseAge` は Renovate が作る更新にしか効かないため、
-人やエージェントが手元で `npm install foo`、`pnpm add foo`、`uv add foo` を実行したときにも効くようにする。
+Renovate の `minimumReleaseAge` は、Renovate が作る更新にしか効かない。
+パッケージマネージャーの設定は、人やエージェントが手元で `npm install foo`、`pnpm add foo`、`uv add foo` を実行したときにも効く。
+
+<!-- cspell:words sdist -->
 
 ## check が判定する項目
 
-`check` は、plan の入力にある lockfile ごとに、同じディレクトリの設定を読んで判定する。
+`check` は、plan の入力にある lockfile を 1 つずつ判定する。判定には、同じディレクトリの設定を読む。
 設定ファイルは dev-standards が生成しないので、利用先が自分で書く。
 
 | lockfile | 待機期間（`cooldown`） | install スクリプト（`install-scripts`） |
@@ -22,7 +24,7 @@ npm:
 - `min-release-age` は npm 11.10.0 で追加された。それより前の npm は設定を無視するので、設定があっても合格にしない。
 - npm の版は、mise が導入するものを根拠にする。`.standards/mise.project.toml` の `tools.npm`、
   なければ `tools.node` に同梱の npm で判断する。
-  npm 11.10 以上を同梱するのは、Node.js 24.14.1 以上の 24 系、25.7.0 以上の 25 系、26 以上である。
+  npm 11.10 以上は、Node.js 24.14.1 以上の 24 系、25.7.0 以上の 25 系、26 以上に同梱されている。
 - `package.json` の `packageManager` に `npm@11.10.0` と書いても、npm は自分の版を切り替えない。
   共通の bootstrap と CI も npm を直接呼ぶので、`packageManager` と `engines` は判定に使わない。
 - 版が分からない場合も合格にしない。
@@ -31,7 +33,7 @@ pnpm:
 
 - pnpm の版は、`package.json` の `packageManager`、なければ `.standards/mise.project.toml` の `tools.pnpm` から読む。
 - `pnpm-workspace.yaml` は、lockfile のディレクトリから上にたどって最初に見つかったものを読む。
-- pnpm 11 以上は `minimumReleaseAge` の既定が 1440 分（1 日）だが、既定の待機は strict ではない。
+- pnpm 11 以上では、`minimumReleaseAge` の既定が 1440 分（1 日）になる。ただし、既定の待機は strict にならない。
   条件を満たす版がないと、待機期間の内側の版を取り込む。このため、既定のままでは合格にしない。
 - `minimumReleaseAge` を明示すると `minimumReleaseAgeStrict` の既定が `true` になり、満たす版がなければ失敗する。
   既定の 1 日のまま合格にするには、`minimumReleaseAgeStrict: true` を書く。
@@ -48,14 +50,14 @@ uv:
 
 - `node-npm` と `python-uv` はコンポーネントの lockfile を、`mise-project` はリポジトリ内のすべての lockfile を対象にする。
   対象の lockfile がなければ `not_applicable` と報告する。
-- `check` が読むのはリポジトリ内の設定だけである。利用者や端末の設定（`~/.npmrc`、`~/.config/uv/uv.toml` など）、
+- `check` はリポジトリ内の設定だけを読む。利用者や端末の設定（`~/.npmrc`、`~/.config/uv/uv.toml` など）、
   環境変数、コマンドラインの指定は判定しない。
 - 読めない設定、解析できない設定は合格にしない。
 
 ## 判定の扱い
 
 設定が足りない場合、`check` は `warn` と報告する。終了コードは変えない。
-既存の利用先の多くがこの設定を持たず、不適合にすると採用版の更新と同時に必須チェックが失敗するためである。
+既存の利用先の多くはこの設定を持たない。不適合にすると、採用版の更新と同時に必須チェックが失敗する。
 `warn` は適合を意味しない。報告の `evidence` に従って設定を追加する。
 
 ## 設定の例

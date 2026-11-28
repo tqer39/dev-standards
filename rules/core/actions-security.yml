@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "CORE-ACTIONS-SECURITY",
-  "revision": 2,
+  "revision": 3,
   "status": "active",
   "title": "GitHub Actions のサプライチェーン攻撃対策を導入する",
   "rationale": "依存するアクションや PR の内容が改ざんされても、リポジトリの権限と secret に被害が及ばないようにする。",

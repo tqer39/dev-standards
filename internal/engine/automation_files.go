@@ -256,6 +256,11 @@ func (t *Tree) appendRuleGuidance(desired map[string]Snapshot) error {
 				fenced = !fenced
 			}
 			if !fenced && strings.HasPrefix(line, "#") {
+				// Guidance files reuse section names, and linters in the projects
+				// reject a document that repeats a heading.
+				if strings.HasPrefix(line, "##") {
+					line += "（" + r.ID + "）"
+				}
 				line = "##" + line
 			}
 			lines = append(lines, line)
@@ -390,13 +395,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Require the supply-chain job
         env:
           SUPPLY_CHAIN: ${{ needs.supply-chain.result }}
         run: test "$SUPPLY_CHAIN" = success
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
         with:
           version: 2026.10.24
