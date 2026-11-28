@@ -19,10 +19,12 @@ Renovate の `minimumReleaseAge` は Renovate が作る更新にしか効かな�
 npm:
 
 - `min-release-age` は npm 11.10.0 で追加された。それより前の npm は設定を無視するので、設定があっても合格にしない。
-- npm の版は、`package.json` の `packageManager`（`npm@x.y.z`）、`.standards/mise.project.toml` の `tools.npm`、
-  `tools.node` の順に読む。`tools.node` からは同梱の npm を判断する。
+- npm の版は、mise が導入するものを根拠にする。`.standards/mise.project.toml` の `tools.npm`、
+  なければ `tools.node` に同梱の npm で判断する。
   npm 11.10 以上を同梱するのは、Node.js 24.14.1 以上の 24 系、25.7.0 以上の 25 系、26 以上である。
-- 版が分からない場合も合格にしない。`package.json` の `engines` は判定に使わない。
+- `package.json` の `packageManager` に `npm@11.10.0` と書いても、npm は自分の版を切り替えない。
+  共通の bootstrap と CI も npm を直接呼ぶので、`packageManager` と `engines` は判定に使わない。
+- 版が分からない場合も合格にしない。
 
 pnpm:
 

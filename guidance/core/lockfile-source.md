@@ -31,6 +31,12 @@ npm は `resolved` の `registry.npmjs.org` を設定中のレジストリに読
 | `.npmrc`（npm と pnpm） | `registry` または `@scope:registry` が `https://registry.npmjs.org/` 以外。`${NAME}` のような環境変数の参照も含む |
 | `pnpm-workspace.yaml` | `registry`、`registries` に `https://registry.npmjs.org/` 以外がある。`namedRegistries` または `pnprServer` がある |
 
+- `.npmrc` は npm の INI パーサーと同じに読む。キーと値の引用符、JSON のエスケープ、`;` と `#` のコメントを解釈し、
+  同じキーは最後の値を採る。
+- npm と同じに解釈できない行がレジストリに関わりうる場合は、不適合にする。
+  文字列にならない引用、セクション、配列（`registry[]`）、キーの中の `${NAME}`、
+  `registry` を含む未知のキー（`replace-registry-host` など）が該当する。
+  `//host/:_authToken` のような認証情報のキーは対象にしない。
 - 安全に読めない `.npmrc`（リポジトリの外を指すシンボリックリンクなど）と、解析できない `pnpm-workspace.yaml` は、
   実際のレジストリが分からないので不適合にする。
 - uv は `uv.lock` に記録した URL から取得するので、uv の index の設定は読まない。

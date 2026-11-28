@@ -164,15 +164,19 @@ func TestDependencyIntakeSettings(t *testing.T) {
 		"npm other directory": {map[string]string{"web/package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet}, "warn", "warn", "fail"},
 
 		// min-release-age は npm 11.10.0 で入った。それより前の npm は設定を無視する。
-		"npm 10 from node 22":    {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"22.23.4\"\n", ".npmrc": npmSet}, "warn", "pass", "pass"},
-		"npm before 24.14.1":     {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"24.14.0\"\n", ".npmrc": npmSet}, "warn", "pass", "pass"},
-		"npm from node 24.14.1":  {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"24.14.1\"\n", ".npmrc": npmSet}, "pass", "pass", "pass"},
-		"npm from node 26":       {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"26.0.0\"\n", ".npmrc": npmSet}, "pass", "pass", "pass"},
-		"npm unknown version":    {map[string]string{"package-lock.json": npmLockOK, ".npmrc": npmSet}, "warn", "pass", "pass"},
-		"npm loose node":         {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"24\"\n", ".npmrc": npmSet}, "warn", "pass", "pass"},
-		"npm packageManager old": {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, "package.json": `{"packageManager":"npm@11.9.0"}`, ".npmrc": npmSet}, "warn", "pass", "pass"},
-		"npm packageManager new": {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"22.23.4\"\n", "package.json": `{"packageManager":"npm@11.10.0+sha512.abc"}`, ".npmrc": npmSet}, "pass", "pass", "pass"},
-		"npm mise npm pin":       {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"22.23.4\"\nnpm = \"11.19.0\"\n", ".npmrc": npmSet}, "pass", "pass", "pass"},
+		"npm 10 from node 22":   {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"22.23.4\"\n", ".npmrc": npmSet}, "warn", "pass", "pass"},
+		"npm before 24.14.1":    {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"24.14.0\"\n", ".npmrc": npmSet}, "warn", "pass", "pass"},
+		"npm from node 24.14.1": {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"24.14.1\"\n", ".npmrc": npmSet}, "pass", "pass", "pass"},
+		"npm from node 26":      {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"26.0.0\"\n", ".npmrc": npmSet}, "pass", "pass", "pass"},
+		"npm unknown version":   {map[string]string{"package-lock.json": npmLockOK, ".npmrc": npmSet}, "warn", "pass", "pass"},
+		"npm loose node":        {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"24\"\n", ".npmrc": npmSet}, "warn", "pass", "pass"},
+		// packageManager を書いても npm は自分の版を切り替えない。mise が導入する版だけを根拠にする。
+		"npm packageManager only":   {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"22.23.3\"\n", "package.json": `{"packageManager":"npm@11.10.0"}`, ".npmrc": npmSet}, "warn", "pass", "pass"},
+		"npm packageManager no pin": {map[string]string{"package-lock.json": npmLockOK, "package.json": `{"packageManager":"npm@11.10.0+sha512.abc"}`, ".npmrc": npmSet}, "warn", "pass", "pass"},
+		"npm packageManager old":    {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, "package.json": `{"packageManager":"npm@10.9.9"}`, ".npmrc": npmSet}, "pass", "pass", "pass"},
+		"npm mise npm old":          {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"24.21.0\"\nnpm = \"10.9.9\"\n", ".npmrc": npmSet}, "warn", "pass", "pass"},
+		"npm mise npm loose":        {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"24.21.0\"\nnpm = \"11\"\n", ".npmrc": npmSet}, "warn", "pass", "pass"},
+		"npm mise npm pin":          {map[string]string{"package-lock.json": npmLockOK, mise: "[tools]\nnode = \"22.23.4\"\nnpm = \"11.19.0\"\n", ".npmrc": npmSet}, "pass", "pass", "pass"},
 
 		// lock が公式の URL でも、registry の設定で実際の取得先を変えられる。
 		"npm registry replaced":     {map[string]string{"package-lock.json": npmLockOK, mise: nodeTools, ".npmrc": npmSet + "registry=https://registry.example.com/\n"}, "pass", "pass", "fail"},

@@ -106,18 +106,18 @@ func dependencyResults(ctx dependencyContext, component string) []Result {
 			return ok && ctx.localDir != nil && ctx.localDir(p)
 		}
 		npmrc := path.Join(dir, ".npmrc")
-		settings := npmrcSettings(ctx.inputs[npmrc].Content)
+		settings, opaque := npmrcSettings(ctx.inputs[npmrc].Content)
 		switch path.Base(name) {
 		case "package-lock.json":
 			if ctx.unreadable[npmrc] {
 				f := finding{"warn", npmrc, "cannot be read safely"}
 				cooldown, scripts = append(cooldown, f), append(scripts, f)
 			} else {
-				cooldown = append(cooldown, npmCooldown(npmrc, settings, npmVersion(ctx.inputs, dir)))
+				cooldown = append(cooldown, npmCooldown(npmrc, settings, npmVersion(ctx.inputs)))
 				scripts = append(scripts, npmScripts(npmrc, settings))
 			}
 			found, err := npmLockViolations(content, local)
-			sources = append(sources, sourceFinding(name, npmRegistry+" with sha512 integrity, and the project settings keep that registry", npmPackageKey, found, err, npmrcRegistryProblems(npmrc, settings, ctx.unreadable[npmrc])))
+			sources = append(sources, sourceFinding(name, npmRegistry+" with sha512 integrity, and the project settings keep that registry", npmPackageKey, found, err, npmrcRegistryProblems(npmrc, settings, opaque, ctx.unreadable[npmrc])))
 		case "pnpm-lock.yaml":
 			workspace := path.Join(dir, "pnpm-workspace.yaml")
 			cfg, ok := pnpmWorkspace(ctx.inputs[workspace].Content)
@@ -126,7 +126,7 @@ func dependencyResults(ctx dependencyContext, component string) []Result {
 			}
 			c, s := pnpmSettings(workspace, cfg, ok, pnpmMajor(ctx.inputs, dir))
 			cooldown, scripts = append(cooldown, c), append(scripts, s)
-			problems := append(npmrcRegistryProblems(npmrc, settings, ctx.unreadable[npmrc]), pnpmRegistryProblems(workspace, cfg, ok)...)
+			problems := append(npmrcRegistryProblems(npmrc, settings, opaque, ctx.unreadable[npmrc]), pnpmRegistryProblems(workspace, cfg, ok)...)
 			found, err := pnpmLockViolations(content, local)
 			sources = append(sources, sourceFinding(name, npmRegistry+" with sha512 integrity, and the project settings keep that registry", pnpmPackageKey, found, err, problems))
 		case "uv.lock":
@@ -214,18 +214,96 @@ func sourceFinding(name, expected string, printable *regexp.Regexp, found []stri
 	return finding{"fail", name, strings.Join(parts, "; ")}
 }
 
-// npmrcSettings keeps the last value of each key, as npm does.
-func npmrcSettings(content string) map[string]string {
-	settings := map[string]string{}
-	for _, line := range strings.Split(normalized(content), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || line[0] == '#' || line[0] == ';' {
+var (
+	npmrcSection    = regexp.MustCompile(`^\[([^\]]*)\]\s*$`)
+	scopedRegistry  = regexp.MustCompile(`^@[^:]+:registry$`)
+	npmrcLineBreaks = regexp.MustCompile(`[\r\n]+`)
+)
+
+// iniUnsafe decodes one key or value the way npm's ini parser does: a quoted
+// token is read as JSON, and elsewhere a backslash escapes ; and #, which
+// otherwise start a comment. exact is false when npm would not get a string.
+func iniUnsafe(raw string) (value string, exact bool) {
+	raw = strings.TrimSpace(raw)
+	double := len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"'
+	single := len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\''
+	if double || single || raw == `"` || raw == `'` {
+		if single {
+			raw = raw[1 : len(raw)-1]
+		}
+		var decoded any
+		if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+			return raw, true
+		}
+		value, exact = decoded.(string)
+		return value, exact
+	}
+	var b strings.Builder
+	escaped := false
+	for _, c := range raw {
+		if escaped {
+			if c != '\\' && c != ';' && c != '#' {
+				b.WriteByte('\\')
+			}
+			b.WriteRune(c)
+			escaped = false
+		} else if c == ';' || c == '#' {
+			break
+		} else if c == '\\' {
+			escaped = true
+		} else {
+			b.WriteRune(c)
+		}
+	}
+	if escaped {
+		b.WriteByte('\\')
+	}
+	return strings.TrimSpace(b.String()), true
+}
+
+// npmrcSettings reads a project .npmrc as npm's ini parser does and keeps the
+// last value of each key. opaque reports a line that may set a registry in a
+// way this function does not reproduce exactly: quoting that yields no string,
+// a section, an array, a key npm expands from the environment, or an unknown
+// key that mentions a registry. Such a file is never taken as keeping the
+// official registry.
+func npmrcSettings(content string) (settings map[string]string, opaque bool) {
+	settings = map[string]string{}
+	section := false
+	for _, line := range npmrcLineBreaks.Split(content, -1) {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || trimmed[0] == ';' || trimmed[0] == '#' {
 			continue
 		}
-		key, value, _ := strings.Cut(line, "=")
-		settings[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(value), `"'`)
+		if npmrcSection.MatchString(line) {
+			section = true
+			continue
+		}
+		rawKey, rawValue, hasValue := strings.Cut(line, "=")
+		if rawKey == "" {
+			continue
+		}
+		key, exact := iniUnsafe(rawKey)
+		value := "true"
+		if hasValue {
+			var exactValue bool
+			value, exactValue = iniUnsafe(rawValue)
+			exact = exact && exactValue
+		}
+		array := len(key) > 2 && strings.HasSuffix(key, "[]")
+		key = strings.TrimSuffix(key, "[]")
+		registry := key == "registry" || scopedRegistry.MatchString(key)
+		// 認証情報のキー（//host/:_authToken など）は、取得先を変えない。
+		mentions := strings.Contains(strings.ToLower(key), "registry") && !strings.HasPrefix(key, "//")
+		if !exact || strings.Contains(key, "${") || (mentions && (!registry || section || array)) {
+			opaque = true
+			continue
+		}
+		if !section && !array {
+			settings[key] = value
+		}
 	}
-	return settings
+	return settings, opaque
 }
 
 func officialNpmRegistry(v any) bool {
@@ -236,11 +314,14 @@ func officialNpmRegistry(v any) bool {
 // npm replaces the registry.npmjs.org host of a lockfile URL with the
 // configured registry, and pnpm resolves integrity-only entries against it, so
 // a project .npmrc can move every download without touching the lockfile.
-func npmrcRegistryProblems(npmrc string, settings map[string]string, unreadable bool) []string {
+func npmrcRegistryProblems(npmrc string, settings map[string]string, opaque, unreadable bool) []string {
 	if unreadable {
 		return []string{npmrc + " cannot be read safely, so the registry in effect is unknown"}
 	}
 	var problems []string
+	if opaque {
+		problems = append(problems, npmrc+" has a line that may set a registry and that this check cannot interpret as npm does")
+	}
 	scoped := false
 	for key, value := range settings {
 		if key == "registry" && !officialNpmRegistry(value) {
@@ -336,17 +417,16 @@ func packageManager(inputs map[string]Snapshot, dir, name string) (string, bool)
 }
 
 // npmVersion reports whether the npm that runs here is known to support
-// min-release-age, added in npm 11.10.0. Without packageManager or a mise npm
-// pin, npm is the one bundled with the pinned Node.js: 24.14.1, 25.7.0 and
-// every 26 release are the first to bundle npm 11.10 or later.
-func npmVersion(inputs map[string]Snapshot, dir string) string {
+// min-release-age, added in npm 11.10.0. The evidence is what mise installs:
+// an npm pin, or else the npm bundled with the pinned Node.js, where 24.14.1,
+// 25.7.0 and every 26 release are the first to bundle npm 11.10 or later.
+// packageManager is not evidence: npm does not switch to the version it
+// names, and the generated bootstrap and CI call npm directly.
+func npmVersion(inputs map[string]Snapshot) string {
 	supported := "npm 11.10 or later"
 	tools := miseTools(inputs)
-	version, ok := packageManager(inputs, dir, "npm")
-	if !ok {
-		version, ok = tools["npm"].(string)
-	}
-	if ok {
+	if pin, pinned := tools["npm"]; pinned {
+		version, _ := pin.(string)
 		if v, exact := versionParts3(version); exact && atLeast(v, [3]int{11, 10, 0}) {
 			return supported
 		} else if exact {
@@ -375,7 +455,7 @@ func npmCooldown(npmrc string, settings map[string]string, version string) findi
 	case "npm 11.10 or later":
 		return finding{"pass", npmrc, set + " with " + version}
 	case "":
-		return finding{"warn", npmrc, set + ", but the npm version is not pinned in packageManager or mise, and npm older than 11.10 ignores the setting"}
+		return finding{"warn", npmrc, set + ", but mise pins neither npm nor an exact Node.js version, and npm older than 11.10 ignores the setting"}
 	}
 	return finding{"warn", npmrc, set + ", but the pinned tools run " + version + ", which ignores the setting"}
 }
