@@ -15,7 +15,7 @@ Renovate の `minimumReleaseAge` は、Renovate が作る更新にしか効か�
 | lockfile | 待機期間（`cooldown`） | install スクリプト（`install-scripts`） |
 | --- | --- | --- |
 | `package-lock.json` | `.npmrc` の `min-release-age` が正の日数で、実行する npm が 11.10 以上 | `.npmrc` の `ignore-scripts=true` |
-| `pnpm-lock.yaml` | `pnpm-workspace.yaml` の `minimumReleaseAge` が正の分数で、`minimumReleaseAgeStrict` が `false` でない | pnpm 11 以上で、`dangerouslyAllowAllBuilds` が有効でない |
+| `pnpm-lock.yaml` | `pnpm-workspace.yaml` の `minimumReleaseAge` が正の分数で、`minimumReleaseAgeStrict` が `false` でない（pnpm 11.0.0〜11.0.3 では `true`） | pnpm 11 以上で、`dangerouslyAllowAllBuilds` が有効でない |
 | `uv.lock` | `uv.toml`、なければ `pyproject.toml` の `[tool.uv]` の `exclude-newer` が、正の期間か過去の日時 | 判定しない（後述） |
 
 npm:
@@ -35,8 +35,11 @@ pnpm:
 - `pnpm-workspace.yaml` は、lockfile のディレクトリから上にたどって最初に見つかったものを読む。
 - pnpm 11 以上では、`minimumReleaseAge` の既定が 1440 分（1 日）になる。ただし、既定の待機は strict にならない。
   条件を満たす版がないと、待機期間の内側の版を取り込む。このため、既定のままでは合格にしない。
-- `minimumReleaseAge` を明示すると `minimumReleaseAgeStrict` の既定が `true` になり、満たす版がなければ失敗する。
+- pnpm 11.0.4 以降では、`minimumReleaseAge` を明示すると `minimumReleaseAgeStrict` の既定が `true` になり、満たす版がなければ失敗する。
   既定の 1 日のまま合格にするには、`minimumReleaseAgeStrict: true` を書く。
+- pnpm 11.0.0〜11.0.3 では、`minimumReleaseAge` を明示しても `minimumReleaseAgeStrict` の既定は `false` のままになる。
+  この範囲の版では、`minimumReleaseAgeStrict: true` を書かないと合格にしない。
+  版によらず strict にするため、設定には `minimumReleaseAgeStrict: true` を明示する。
 - pnpm 11 以上は、依存の build script を既定で実行しない。pnpm 11 で `onlyBuiltDependencies` などは廃止され、
   `allowBuilds` に置き換わった。build script が必要な依存だけを `allowBuilds` で許可する。
 
@@ -96,12 +99,12 @@ exclude-newer = "7 days"
 ## lockfile と CI との関係
 
 - npm: `min-release-age` は新しく解決する版にだけ効く。`npm ci` は `package-lock.json` のとおりに導入するので、影響を受けない。
-- uv: `exclude-newer` を追加・変更したら、`uv lock` を実行して `uv.lock` を更新する。
+- uv: `exclude-newer` と `exclude-newer-package` を追加・変更・削除したら、`uv lock` を実行して `uv.lock` を更新する。
   更新しないと、`uv sync --locked` と `uv run --locked` は lock が古いとして失敗する。
   相対指定（`"7 days"`）では、uv 0.11.32 と 0.13.8 は `uv.lock` の `[options]` に期間（`exclude-newer-span = "P7D"`）を記録する。
   併記される `exclude-newer` は互換のための固定値（`0001-01-01T00:00:00Z`）で、解決した時刻ではない。
   この 2 つの版では、日付が変わっても `--locked` は失敗せず、`uv lock` をやり直しても差分は出ない。
-- pnpm: 現在の pnpm は、lockfile を読み込むときにも `minimumReleaseAge` を lockfile の各項目に適用して検証する。
+- pnpm: pnpm 11.1.3 以降は、lockfile を読み込むときにも `minimumReleaseAge` を lockfile の各項目に適用して検証する。
   `trustLockfile: true` はこの検証を省くので、設定しない。
 
 ## Renovate との関係
@@ -111,7 +114,15 @@ exclude-newer = "7 days"
 - 脆弱性の修正は Renovate の待機の対象外（`vulnerabilityAlerts` の `minimumReleaseAge` が `null`）だが、
   パッケージマネージャーの待機はそのまま効く。待機期間より新しい修正版への更新は、lockfile の生成で失敗する。
   急ぐ場合は、該当のパッケージだけを除外する（npm は `min-release-age-exclude`、pnpm は `minimumReleaseAgeExclude`、
-  uv は `exclude-newer-package`）。除外は修正版を取り込んだ後に取り除く。
+  uv は `exclude-newer-package`）。
+- 除外は、除外したパッケージの lockfile にある版がすべて待機期間を過ぎた後に取り除く。修正版を取り込んだ直後には取り除かない。
+  pnpm の除外をパッケージ名だけで書くと、そのパッケージのすべての版に効く。
+  除外の間に、修正版より新しい版が lockfile に入ることがあるので、修正版の公開日だけでは判断しない。
+  pnpm 11.1.3 以降は lockfile の各項目にも待機期間を適用する。
+  待機期間の内側の版が残ったまま除外を外すと、次の install が拒否される。
+  pnpm 11.1.2 以前は lockfile を検証しないが、同じ手順で取り除く。
+- uv は、`exclude-newer-package` を追加したときだけでなく、取り除いたときにも `uv lock` を実行して `uv.lock` を更新する。
+  取り除いただけでは、`uv sync --locked` と `uv run --locked` は lock が古いとして失敗する（uv 0.11.32 と 0.13.8 で確認）。
 - Renovate は uv の `exclude-newer` を読まず、uv にも待機期間を渡さない。
 
 ## uv の sdist のビルド

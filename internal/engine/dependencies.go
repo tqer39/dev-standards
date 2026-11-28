@@ -155,7 +155,7 @@ func dependencyResults(ctx dependencyContext, component string) []Result {
 			if ctx.unreadable[workspace] {
 				ok = false
 			}
-			c, s := pnpmSettings(workspace, cfg, ok, pnpmMajor(ctx.inputs, dir))
+			c, s := pnpmSettings(workspace, cfg, ok, pnpmVersion(ctx.inputs, dir))
 			cooldown, scripts = append(cooldown, c), append(scripts, s)
 			problems = append(problems, pnpmRegistryProblems(workspace, cfg, ok)...)
 			found, err := pnpmLockViolations(content, local)
@@ -524,14 +524,14 @@ func npmScripts(npmrc string, settings map[string]string) finding {
 	return finding{"pass", npmrc, "ignore-scripts=true"}
 }
 
-// pnpmMajor prefers packageManager, which pnpm itself enforces, over mise.
-func pnpmMajor(inputs map[string]Snapshot, dir string) int {
+// pnpmVersion prefers packageManager, which pnpm itself enforces, over mise.
+func pnpmVersion(inputs map[string]Snapshot, dir string) [3]int {
 	version, ok := packageManager(inputs, dir, "pnpm")
 	if !ok {
 		version, _ = miseTools(inputs)["pnpm"].(string)
 	}
 	v, _ := versionParts3(version)
-	return v[0]
+	return v
 }
 
 func number(v any) (float64, bool) {
@@ -544,11 +544,12 @@ func number(v any) (float64, bool) {
 	return 0, false
 }
 
-func pnpmSettings(workspace string, cfg map[string]any, parsed bool, major int) (cooldown, scripts finding) {
+func pnpmSettings(workspace string, cfg map[string]any, parsed bool, pnpm [3]int) (cooldown, scripts finding) {
 	if !parsed {
 		f := finding{"warn", workspace, "cannot be read or parsed"}
 		return f, f
 	}
+	major := pnpm[0]
 	safeDefaults := major >= pnpmSafeDefaultsMajor
 	version := "the pnpm version is not pinned in packageManager or mise"
 	if major > 0 {
@@ -569,6 +570,9 @@ func pnpmSettings(workspace string, cfg map[string]any, parsed bool, major int) 
 		cooldown = finding{"warn", workspace, version + " applies its default minimumReleaseAge without minimumReleaseAgeStrict, so it falls back to a version inside the cooldown"}
 	case !explicit:
 		cooldown = finding{"pass", workspace, version + " applies its default minimumReleaseAge of 1440 minutes with minimumReleaseAgeStrict"}
+	case !strictSet && major == 11 && !atLeast(pnpm, [3]int{11, 0, 4}):
+		// pnpm 11.0.4 から、minimumReleaseAge を明示すると strict が既定になった。
+		cooldown = finding{"warn", workspace, "pnpm 11.0.0 to 11.0.3 does not enforce minimumReleaseAge strictly unless minimumReleaseAgeStrict is true"}
 	default:
 		cooldown = finding{"pass", workspace, "minimumReleaseAge is a positive number of minutes, enforced strictly"}
 	}

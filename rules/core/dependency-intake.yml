@@ -35,7 +35,7 @@
   "remediation": {
     "mode": "manual",
     "handler": "package-manager-config",
-    "instructions": "check の warn の内容に従い、npm は 11.10 以上にして .npmrc に min-release-age と ignore-scripts=true を、pnpm は 11 以上にして pnpm-workspace.yaml に minimumReleaseAge（既定のままなら minimumReleaseAgeStrict: true）と allowBuilds を、uv は uv.toml か pyproject.toml の tool.uv に exclude-newer を設定する。uv は設定後に uv lock を実行して uv.lock を更新する。これらのファイルは dev-standards が生成しないため、利用先で変更する。"
+    "instructions": "check の warn の内容に従い、npm は 11.10 以上にして .npmrc に min-release-age と ignore-scripts=true を、pnpm は 11 以上にして pnpm-workspace.yaml に minimumReleaseAge と minimumReleaseAgeStrict: true と allowBuilds を、uv は uv.toml か pyproject.toml の tool.uv に exclude-newer を設定する。uv は設定の追加・変更・削除の後に uv lock を実行して uv.lock を更新する。これらのファイルは dev-standards が生成しないため、利用先で変更する。"
   },
   "guidance": "guidance/core/dependency-intake.md",
   "references": [

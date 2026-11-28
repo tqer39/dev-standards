@@ -47,8 +47,11 @@ run = "zizmor --offline --min-severity medium .github"
 
 [tasks."security:secrets"]
 # 過去の誤検知を拾わないよう、全履歴ではなく作業ツリーを検査する。
-# 値をログに残さないよう伏せたうえで、検出したファイルと行を表示する。
-run = "betterleaks dir --no-banner --verbose --redact ."
+# --verbose は、検出した行にある別の secret を伏せずに表示するので使わない。
+# 報告のテンプレートで、検出したファイル、行、ルール ID だけを表示する。
+# raw で囲むのは、mise が {{ }} を自分のテンプレートとして解釈しないようにするため。
+shell = "bash -c"
+run = """betterleaks dir --no-banner --redact --report-format template --report-template <(printf '%s' '{% raw %}{{range .}}{{toJSON .File}}:{{.StartLine}} {{.RuleID}}{{"\\n"}}{{end}}{% endraw %}') --report-path - ."""
 
 [tasks."session:verify"]
 run = "go run ./cmd/dev-standards session-verify"
