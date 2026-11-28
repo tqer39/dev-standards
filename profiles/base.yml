@@ -15,7 +15,8 @@
     "PROCESS-LANGUAGE",
     "PROCESS-AI-DISCLOSURE",
     "PROCESS-PROJECT-TRACKING",
-    "PROCESS-WORKTREE"
+    "PROCESS-WORKTREE",
+    "CORE-TYPESCRIPT-TSRS"
   ],
   "platforms": [
     "macos",
