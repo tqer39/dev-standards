@@ -47,13 +47,25 @@ jobs:
       - uses: ./.github/actions/setup
       - shell: bash
         run: mise exec -- go test -timeout=20m -run '^TestFleetUpdatesSourceAndProjectWithoutHumanApproval$' ./internal/automation
+  # ワークフローの静的解析と secret の検査は OS に依存しないので、Ubuntu だけで実行する。
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: mise run security:actions
+      - run: mise run security:secrets
   workflow-result:
     if: always()
-    needs: [check, acceptance]
+    needs: [check, acceptance, security]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - env:
           CHECK: ${{ needs.check.result }}
           ACCEPTANCE: ${{ needs.acceptance.result }}
-        run: test "$CHECK" = success && test "$ACCEPTANCE" = success
+          SECURITY: ${{ needs.security.result }}
+        run: test "$CHECK" = success && test "$ACCEPTANCE" = success && test "$SECURITY" = success
